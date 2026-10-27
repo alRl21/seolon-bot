@@ -22,6 +22,9 @@ def initialise_titles(store):
         ''')
         if 'series' not in {r[1] for r in db.execute('PRAGMA table_info(titles)')}:
             db.execute("ALTER TABLE titles ADD COLUMN series TEXT NOT NULL DEFAULT '기타'")
+        columns={r[1] for r in db.execute('PRAGMA table_info(titles)')}
+        if 'tier' not in columns: db.execute('ALTER TABLE titles ADD COLUMN tier INTEGER NOT NULL DEFAULT 1')
+        if 'colour' not in columns: db.execute('ALTER TABLE titles ADD COLUMN colour INTEGER NOT NULL DEFAULT 0')
 
 
 def rows(store, guild, user=None):

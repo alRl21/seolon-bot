@@ -15,6 +15,21 @@ OWNER_ID=1119230372174123169
 LOG=logging.getLogger('seolon')
 TITLE_NAMES={'첫눈':'설중매향','눈길':'설월청휘','설온의 시작':'설온지연'}
 TITLE_MEANINGS={'설중매향':('雪中梅香','눈 속에 피어난 매화의 향기'),'설월청휘':('雪月淸輝','눈과 달이 빚어낸 맑은 빛'),'설온지연':('雪溫之緣','설온에서 이어진 인연')}
+SERIES_NAMES={'겨울':'설월의 시','기념':'인연의 서약'}
+PALETTES={'설월의 시':(0xBFD9EF,0x82AFD6,0x4B7DB8,0x315294),
+          '인연의 서약':(0xD7C8EE,0xB49AD9,0x8B69BE,0x654694)}
+DEFAULT_PALETTE=(0xB9DFD4,0x7EC4AF,0x439C86,0x236B5A)
+TITLE_MEANINGS.update({'월하설영':('月下雪影','달 아래 드리운 눈의 그림자'),
+ '현야빙화':('玄夜氷華','깊은 밤에 피어난 얼음꽃'),
+ '성상지약':('星霜之約','오랜 세월을 함께하겠다는 약속'),
+ '연휘지증':('緣輝之證','빛나는 인연의 증표'),
+ '영설지인':('永雪之印','오래도록 남을 설온의 인장')})
+
+
+def tier_colour(series,tier):
+    if not 1<=tier<=4:raise ValueError('단계는 1~4입니다.')
+    return PALETTES.get(series,DEFAULT_PALETTE)[tier-1]
+
 ADMIN_COMMANDS={'칭호생성','칭호판매설정','칭호판매중지','칭호수정','칭호지급','칭호회수'}
 
 
@@ -146,7 +161,7 @@ class TitlePicker(discord.ui.View):
         self.store,self.choices,self.mode,self.user,self.page=store,choices,mode,user,page
         selected=choices[page*25:(page+1)*25]
         select=discord.ui.Select(placeholder='칭호를 선택하세요',options=[discord.SelectOption(label=r['name'][:100],value=str(r['id']),
-            description=(r['series']+' · '+KINDS[r['kind']] + (f" · {r['price']:,}눈송이" if r['kind']!='grant' else ' · 구매 불가'))[:100]) for r in selected])
+            description=(r['series']+f" · {r['tier']}단계 · "+KINDS[r['kind']] + (f" · {r['price']:,}눈송이" if r['kind']!='grant' else ' · 구매 불가'))[:100]) for r in selected])
         async def pick(i):
             row=get_title(store,GUILD_ID,int(select.values[0]))
             if row is None: raise ValueError('칭호가 없습니다.')
@@ -193,7 +208,7 @@ class TitleAction(TitlePicker):
 
 def detail_embed(row):
     import time
-    desc='세트: '+row['series']+'\n'+KINDS[row['kind']]
+    desc='세트: '+row['series']+f" · {row.get('tier',1)}단계\n"+KINDS[row['kind']]
     if row['kind']=='grant': desc+=' · 관리자 지급으로만 획득'
     else:
         desc+=f"\n가격: {row['price']:,}눈송이"
@@ -202,7 +217,7 @@ def detail_embed(row):
         if row['stock'] is not None: desc+=f"\n남은 판매 수량: {max(0,row['stock']-row['sold'])}개"
     meaning=TITLE_MEANINGS.get(row['name'])
     if meaning: desc=f'{meaning[0]} · {meaning[1]}\n\n'+desc
-    return discord.Embed(title=row['name'],description=desc,colour=0xB8C8D8)
+    return discord.Embed(title=row['name'],description=desc,colour=row.get('colour') or 0xB8C8D8)
 
 
 async def show_picker(i,store,choices,mode):
@@ -213,9 +228,13 @@ async def show_picker(i,store,choices,mode):
                                   view=TitlePicker(store,choices,mode,i.user.id),ephemeral=True)
 
 
-async def new_role_title(guild,store,name,kind,price,hidden,actor,series='기타'):
+async def new_role_title(guild,store,name,kind,price,hidden,actor,series='기타',tier=1):
     series=series.strip()
+    colour=tier_colour(series,tier)
     if not 1<=len(series)<=20 or any(x in series for x in ['@','\n','\r']): raise ValueError('세트 이름은 멘션·줄바꿈 없이 1~20자입니다.')
+    same_series=[r for r in rows(store,GUILD_ID) if r['series']==series]
+    if len(same_series)>=4:raise ValueError('한 세트는 4개까지 등록합니다. 새 세트를 만들어 주세요.')
+    if any(r['tier']==tier for r in same_series):raise ValueError('이 세트의 해당 단계는 이미 있습니다. 빈 단계를 선택하세요.')
     name=name.strip()
     if not 1<=len(name)<=40 or any(x in name for x in ['@','\n','\r']):
         raise ValueError('이름은 멘션·줄바꿈 없이 1~40자로 입력하세요.')
@@ -228,11 +247,12 @@ async def new_role_title(guild,store,name,kind,price,hidden,actor,series='기타
     existing=[r for r in roles if r.name==role_name]
     if existing and (len(existing)!=1 or existing[0].id!=store.get('titles:pending-role')):
         raise ValueError('같은 이름의 역할이 이미 있습니다. 다른 이름을 사용하세요.')
-    role=existing[0] if existing else await guild.create_role(name=role_name,permissions=discord.Permissions.none(),hoist=False,mentionable=False,
+    role=existing[0] if existing else await guild.create_role(name=role_name,permissions=discord.Permissions.none(),hoist=False,mentionable=False,colour=discord.Colour(colour),
                                  reason='관리자가 요청한 장식 전용 칭호 생성')
     store.put('titles:pending-role',role.id)
     role_safe(guild,role)
     tid=create_title(store,GUILD_ID,name,role.id,kind,price,hidden,actor,series)
+    with store.connect() as db:db.execute('UPDATE titles SET tier=?,colour=? WHERE id=?',(tier,colour,tid))
     store.put('titles:pending-role',0)
     await organise_roles(guild,store,LOG)
     return tid,role
@@ -256,6 +276,39 @@ async def refresh_default_title_names(guild,store,logger):
     store.put('titles:literary-names',1)
 
 
+async def setup_title_progression(guild,store,logger):
+    if store.get('titles:four-tier-style')==1:return
+    roles={r.id:r for r in await guild.fetch_roles()}
+    for old,new in SERIES_NAMES.items():
+        separator_id=store.get('roles:series:'+old)
+        if separator_id:
+            separator=roles.get(separator_id)
+            if separator:
+                role_safe(guild,separator)
+                await separator.edit(name='─ '+new+' ─',reason='소유자 요청: 칭호 세트 이름 변경')
+            store.put('roles:series:'+new,separator_id)
+            with store.connect() as db:db.execute('DELETE FROM objects WHERE key=?',('roles:series:'+old,))
+        with store.connect() as db:db.execute('UPDATE titles SET series=? WHERE guild=? AND series=?',(new,GUILD_ID,old))
+    defaults=[('설중매향','sale',650,'설월의 시',1),('설월청휘','sale',1200,'설월의 시',2),
+              ('월하설영','sale',2400,'설월의 시',3),('현야빙화','sale',4800,'설월의 시',4),
+              ('설온지연','grant',0,'인연의 서약',1),('성상지약','grant',0,'인연의 서약',2),
+              ('연휘지증','grant',0,'인연의 서약',3),('영설지인','grant',0,'인연의 서약',4)]
+    for name,kind,price,series,tier in defaults:
+        title=next((r for r in rows(store,GUILD_ID) if r['name']==name),None)
+        if title is None:
+            await new_role_title(guild,store,name,kind,price,False,OWNER_ID,series,tier)
+            title=next(r for r in rows(store,GUILD_ID) if r['name']==name)
+        role=next((r for r in await guild.fetch_roles() if r.id==title['role']),None)
+        role_safe(guild,role)
+        colour=tier_colour(series,tier)
+        await role.edit(colour=discord.Colour(colour),reason='소유자 요청: 칭호 등급이 높을수록 진한 색으로 설정')
+        with store.connect() as db:
+            db.execute('UPDATE titles SET series=?,tier=?,colour=?,price=? WHERE id=?',
+                       (series,tier,colour,price,title['id']))
+        logger.warning('칭호 단계 설정 완료: %s · %s단계 · %s · 가격 %s · 색 #%06X',series,tier,name,price,colour)
+    store.put('titles:four-tier-style',1)
+
+
 async def setup_titles(guild,store,logger):
     initialise_titles(store)
     async with TITLE_LOCK:
@@ -263,8 +316,9 @@ async def setup_titles(guild,store,logger):
         if not store.get('titles:seeded'):
             for name,kind,price,series in [('설중매향','sale',650,'겨울'),('설월청휘','sale',1200,'겨울'),('설온지연','grant',0,'기념')]:
                 if any(r['name']==name for r in rows(store,GUILD_ID)): continue
-                await new_role_title(guild,store,name,kind,price,False,OWNER_ID,series)
+                await new_role_title(guild,store,name,kind,price,False,OWNER_ID,series,2 if name=='설월청휘' else 1)
             store.put('titles:seeded',1)
+        await setup_title_progression(guild,store,logger)
         if not store.get('titles:panel'):
             cid=store.get('text:﹒눈꽃상점')
             channels=await guild.fetch_channels()
@@ -277,6 +331,8 @@ async def setup_titles(guild,store,logger):
     verified_roles={r.id:r for r in await guild.fetch_roles()}
     for title in rows(store,GUILD_ID):
         role_safe(guild,verified_roles.get(title['role']))
+        if verified_roles[title['role']].colour.value != title['colour']:
+            raise RuntimeError('칭호 색상 적용 확인 실패: '+title['name'])
     logger.warning('눈송이 칭호 상점 준비 완료 · 칭호 %s개 · 관리자 명령 생성/판매설정/수정/지급/회수 · 패널 %s',len(rows(store,GUILD_ID)),store.get('titles:panel'))
 
 
@@ -284,11 +340,11 @@ def register_commands(tree,store,scope):
     @tree.command(name='칭호생성',description='장식용 칭호 역할을 생성하고 등록합니다',guild=scope)
     @app_commands.default_permissions(administrator=True)
     @app_commands.choices(종류=[app_commands.Choice(name=v,value=k) for k,v in KINDS.items()])
-    async def create(i:discord.Interaction,이름:str,종류:app_commands.Choice[str],가격:app_commands.Range[int,0,1000000]=0,숨김:bool=False,세트:str='기타'):
+    async def create(i:discord.Interaction,이름:str,종류:app_commands.Choice[str],가격:app_commands.Range[int,0,1000000]=0,숨김:bool=False,세트:str='기타',단계:app_commands.Range[int,1,4]=1):
         admin(i);await i.response.defer(ephemeral=True)
         async with TITLE_LOCK:
             admin(i)
-            tid,role=await new_role_title(i.guild,store,이름,종류.value,가격,숨김,i.user.id,세트)
+            tid,role=await new_role_title(i.guild,store,이름,종류.value,가격,숨김,i.user.id,세트,단계)
         await i.followup.send(f'칭호 #{tid} · {role.name} 생성 완료. 한정 판매는 /칭호판매설정으로 조건을 지정해야 판매됩니다.',ephemeral=True)
 
     @tree.command(name='칭호판매설정',description='가격·종료일·총 판매 수량을 지정합니다',guild=scope)
@@ -316,7 +372,7 @@ def register_commands(tree,store,scope):
 
     @tree.command(name='칭호수정',description='칭호 이름과 숨김 여부를 수정합니다',guild=scope)
     @app_commands.default_permissions(administrator=True)
-    async def edit(i:discord.Interaction,칭호:discord.Role,이름:str='',숨김:bool=False,세트:str=''):
+    async def edit(i:discord.Interaction,칭호:discord.Role,이름:str='',숨김:bool=False,세트:str='',단계:app_commands.Range[int,1,4]=None):
         admin(i);await i.response.defer(ephemeral=True)
         async with TITLE_LOCK:
             admin(i)
@@ -328,8 +384,12 @@ def register_commands(tree,store,scope):
             if any(r['name']==name and r['id']!=row['id'] for r in rows(store,GUILD_ID)): raise ValueError('중복된 이름입니다.')
             series=세트.strip() or row['series']
             if not 1<=len(series)<=20 or any(x in series for x in ['@','\n','\r']): raise ValueError('세트 이름 형식을 확인하세요.')
-            await 칭호.edit(name='⟡ '+name,reason='관리자가 요청한 칭호 이름 변경')
-            with store.connect() as db: db.execute('UPDATE titles SET name=?,hidden=?,series=? WHERE id=?',(name,int(숨김),series,row['id']))
+            tier=단계 or row['tier']
+            others=[r for r in rows(store,GUILD_ID) if r['series']==series and r['id']!=row['id']]
+            if len(others)>=4 or any(r['tier']==tier for r in others):raise ValueError('세트는 최대4개이며 단계가 겹칠 수 없습니다.')
+            colour=tier_colour(series,tier)
+            await 칭호.edit(name='⟡ '+name,colour=discord.Colour(colour),reason='관리자가 요청한 칭호 이름 변경')
+            with store.connect() as db: db.execute('UPDATE titles SET name=?,hidden=?,series=?,tier=?,colour=? WHERE id=?',(name,int(숨김),series,tier,colour,row['id']))
             await organise_roles(i.guild,store,LOG)
             record(store,'칭호 수정',i.user.id,칭호.id,{'이름':name,'숨김':숨김})
         await i.followup.send('칭호를 수정했어요. 숨김 칭호는 상점에서만 숨기며 보유자는 내 칭호에서 확인해요.',ephemeral=True)

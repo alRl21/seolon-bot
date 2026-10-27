@@ -16,7 +16,9 @@ def group_ids(roles,title_ids,separator_ids,bot_top,everyone_id):
 
 async def organise_roles(guild,store,logger):
     with store.connect() as db:
-        title_series={r[0]:r[1] for r in db.execute('SELECT role,series FROM titles WHERE guild=?',(guild.id,))}
+        title_rows=db.execute('SELECT role,series,tier,price FROM titles WHERE guild=?',(guild.id,)).fetchall()
+        title_series={r[0]:r[1] for r in title_rows}
+        title_order={r[0]:(r[2],r[3],r[0]) for r in title_rows}
         title_ids=set(title_series)
         series_separators={r[0][len('roles:series:'):]:r[1] for r in db.execute("SELECT key,id FROM objects WHERE key LIKE 'roles:series:%'")}
     roles=await guild.fetch_roles()
@@ -55,7 +57,7 @@ async def organise_roles(guild,store,logger):
         if groups[key]:
             if key=='titles':
                 for series in reversed(active_series):
-                    desired.extend(rid for rid in groups[key] if title_series[rid]==series)
+                    desired.extend(sorted((rid for rid in groups[key] if title_series[rid]==series),key=lambda rid:title_order[rid],reverse=True))
                     desired.append(series_separators[series])
             else:
                 desired.extend(groups[key])

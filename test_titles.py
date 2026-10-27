@@ -99,3 +99,24 @@ class PricingAndSeriesTests(unittest.TestCase):
             restored=Store(s.path)
             self.assertEqual(rows(restored,1,2)[0]['series'],'기념')
             with self.assertRaises(ValueError):purchase(restored,1,3,title)
+
+class TierPaletteTests(unittest.TestCase):
+    def test_each_palette_has_four_distinct_progressively_darker_colours(self):
+        from titles_ui import PALETTES,tier_colour
+        for series,palette in PALETTES.items():
+            self.assertEqual(len(set(palette)),4)
+            brightness=[]
+            for tier in range(1,5):
+                color=tier_colour(series,tier)
+                brightness.append(0.2126*((color>>16)&255)+0.7152*((color>>8)&255)+0.0722*(color&255))
+            self.assertTrue(all(a>b for a,b in zip(brightness,brightness[1:])))
+        with self.assertRaises(ValueError):tier_colour('설월의 시',5)
+
+    def test_schema_upgrade_preserves_owned_and_adds_style_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(Path(tmp)/'db');initialise_titles(s)
+            tid=create_title(s,1,'보유 칭호',50,'grant',0,False,9,'세트')
+            grant(s,1,2,tid,9)
+            initialise_titles(s)
+            row=rows(s,1,2)[0]
+            self.assertEqual((row['role'],row['tier'],row['colour']),(50,1,0))
