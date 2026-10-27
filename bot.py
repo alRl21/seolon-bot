@@ -11,6 +11,7 @@ from discord import app_commands
 
 from core import GUILD_ID, LAYOUT, Store, PROTECTED_CHANNEL_IDS, ARCHIVE_NAME, VOICE_NAMES
 from schedule import active_seconds
+from reset_ui import show_reset
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
 store = Store(DATA / 'seolon.sqlite3')
@@ -255,6 +256,12 @@ async def attendance(interaction: discord.Interaction):
     await interaction.response.send_message(text, ephemeral=True)
 
 
+@client.tree.command(name='초기화', description='보호 채널 4개 외 기존 채널을 삭제하고 새 디자인을 만듭니다', guild=scope)
+@app_commands.default_permissions(administrator=True)
+async def reset(interaction: discord.Interaction):
+    await show_reset(interaction, store, DATA, lock, require_admin, log)
+
+
 @client.tree.command(name='여권', description='내 출석과 눈꽃 잔액을 확인합니다', guild=scope)
 async def passport(interaction: discord.Interaction):
     balance, days = store.profile(interaction.guild_id, interaction.user.id)
@@ -267,7 +274,7 @@ async def passport(interaction: discord.Interaction):
 
 @client.tree.command(name='상태', description='봇의 현재 기능을 확인합니다', guild=scope)
 async def status(interaction: discord.Interaction):
-    await interaction.response.send_message('설온 봇 v0.2 · 보호 채널 4개\n사용 가능: /디자인 /출석 /여권 /구조기록\n'
+    await interaction.response.send_message('설온 봇 v0.3 · 보호 채널 4개\n사용 가능: /디자인 /초기화 /출석 /여권 /구조기록\n'
                                            '아직 없음: 상점 교환, 자동 역할, 음성방, 제재, AI 대화', ephemeral=True)
 
 
