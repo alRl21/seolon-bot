@@ -101,10 +101,10 @@ class ShopPanel(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label='칭호 상점',style=discord.ButtonStyle.primary,custom_id='seolon:titles:shop:v1')
+    @discord.ui.button(label='상점',style=discord.ButtonStyle.primary,custom_id='seolon:titles:shop:v1')
     async def shop(self,i,button):
-        choices=[r for r in rows(self.store,GUILD_ID) if not r['hidden']]
-        await show_series(i,self.store,choices,'shop')
+        from items_ui import StoreMenu
+        await render(i,content='칭호 또는 아이템을 선택하세요.',view=StoreMenu(self.store,i.user.id))
 
     @discord.ui.button(label='내 칭호',style=discord.ButtonStyle.secondary,custom_id='seolon:titles:owned:v1')
     async def owned(self,i,button):
@@ -117,6 +117,11 @@ class ShopPanel(discord.ui.View):
             available(i)
             await wear(i,self.store,None)
         await render(i,content='칭호를 해제했어요. 보유 칭호는 그대로 남아 있어요.',view=MenuHome(self.store,i.user.id))
+
+    @discord.ui.button(label='칭호 도감',custom_id='seolon:titles:codex:v1')
+    async def codex(self,i,button):
+        from community_ui import show_codex
+        await show_codex(i,self.store)
 
     async def on_error(self,i,error,item):
         LOG.exception('칭호 버튼 처리 실패',exc_info=error)
@@ -186,7 +191,7 @@ class TitlePicker(discord.ui.View):
         self.store,self.choices,self.mode,self.user,self.page=store,choices,mode,user,page
         selected=choices[page*25:(page+1)*25]
         select=discord.ui.Select(placeholder='칭호를 선택하세요',options=[discord.SelectOption(label=r['name'][:100],value=str(r['id']),
-            description=(r['series']+f" · {r['tier']}단계 · "+KINDS[r['kind']] + (f" · {r['price']:,}눈송이" if r['kind']!='grant' else ' · 구매 불가'))[:100]) for r in selected])
+            description=(r['series']+(' · 히든 · ' if r['tier']==5 else f" · {r['tier']}단계 · " )+KINDS[r['kind']] + (f" · {r['price']:,}눈송이" if r['kind']!='grant' else ' · 구매 불가'))[:100]) for r in selected])
         async def pick(i):
             row=get_title(store,GUILD_ID,int(select.values[0]))
             if row is None: raise ValueError('칭호가 없습니다.')
@@ -251,7 +256,7 @@ class TitleAction(TitlePicker):
 
 def detail_embed(row):
     import time
-    desc='세트: '+row['series']+f" · {row.get('tier',1)}단계\n"+KINDS[row['kind']]
+    desc='세트: '+row['series']+(' · 히든\n' if row.get('tier')==5 else f" · {row.get('tier',1)}단계\n")+KINDS[row['kind']]
     if row['kind']=='grant': desc+=' · 관리자 지급으로만 획득'
     else:
         desc+=f"\n가격: {row['price']:,}눈송이"
@@ -275,7 +280,7 @@ async def new_role_title(guild,store,name,kind,price,hidden,actor,series='기타
     series=series.strip()
     colour=tier_colour(series,tier)
     if not 1<=len(series)<=20 or any(x in series for x in ['@','\n','\r']): raise ValueError('세트 이름은 멘션·줄바꿈 없이 1~20자입니다.')
-    same_series=[r for r in rows(store,GUILD_ID) if r['series']==series]
+    same_series=[r for r in rows(store,GUILD_ID) if r['series']==series and r['tier']<=4]
     if len(same_series)>=4:raise ValueError('한 세트는 4개까지 등록합니다. 새 세트를 만들어 주세요.')
     if any(r['tier']==tier for r in same_series):raise ValueError('이 세트의 해당 단계는 이미 있습니다. 빈 단계를 선택하세요.')
     name=name.strip()
@@ -297,6 +302,8 @@ async def new_role_title(guild,store,name,kind,price,hidden,actor,series='기타
     tid=create_title(store,GUILD_ID,name,role.id,kind,price,hidden,actor,series)
     with store.connect() as db:db.execute('UPDATE titles SET tier=?,colour=? WHERE id=?',(tier,colour,tid))
     store.put('titles:pending-role',0)
+    from collection_rewards import ensure_collections
+    await ensure_collections(guild,store,LOG)
     await organise_roles(guild,store,LOG)
     return tid,role
 
@@ -370,6 +377,14 @@ async def setup_titles(guild,store,logger):
             embed=discord.Embed(title='칭호 상점',colour=0xB8C8D8,description='눈송이로 칭호를 모아 보세요.\n여러 칭호를 보유하고, 한 번에 하나만 착용할 수 있어요.\n상시 판매 · 기간/수량 한정 판매 · 관리자 지급 전용\n판매가 끝나도 이미 얻은 칭호는 계속 사용할 수 있어요.\n상점과 보유 칭호는 아래 버튼으로 확인하세요.')
             m=await channel.send(embed=embed,view=ShopPanel(store))
             store.put('titles:panel',m.id)
+    if store.get('titles:panel-version')!=2:
+        channel=guild.get_channel(store.get('text:﹒눈꽃상점') or 0)
+        message=await channel.fetch_message(store.get('titles:panel'))
+        embed=discord.Embed(title='상점',colour=0xB8C8D8,description='눈송이로 칭호와 아이템을 구매하세요.\n상점 → 칭호 / 아이템 · 구매한 물건은 내 가방에서 사용\n칭호 도감의 4개를 완성하면 구매할 수 없는 히든 칭호를 획득해요.\n히든 칭호도 내 칭호에서 착용할 수 있어요.')
+        await message.edit(embed=embed,view=ShopPanel(store))
+        store.put('titles:panel-version',2)
+    from collection_rewards import ensure_collections
+    await ensure_collections(guild,store,logger)
     await organise_roles(guild,store,logger)
     verified_roles={r.id:r for r in await guild.fetch_roles()}
     for title in rows(store,GUILD_ID):
@@ -428,9 +443,12 @@ def register_commands(tree,store,scope):
             series=세트.strip() or row['series']
             if not 1<=len(series)<=20 or any(x in series for x in ['@','\n','\r']): raise ValueError('세트 이름 형식을 확인하세요.')
             tier=단계 or row['tier']
-            others=[r for r in rows(store,GUILD_ID) if r['series']==series and r['id']!=row['id']]
-            if len(others)>=4 or any(r['tier']==tier for r in others):raise ValueError('세트는 최대4개이며 단계가 겹칠 수 없습니다.')
-            colour=tier_colour(series,tier)
+            if row['tier']==5:
+                if 단계 is not None or series!=row['series']:raise ValueError('도감 히든 보상은 단계·세트를 변경할 수 없습니다.')
+                숨김=True
+            others=[r for r in rows(store,GUILD_ID) if r['series']==series and r['id']!=row['id'] and r['tier']<=4]
+            if tier<=4 and (len(others)>=4 or any(r['tier']==tier for r in others)):raise ValueError('세트는 최대4개이며 단계가 겹칠 수 없습니다.')
+            colour=row['colour'] if tier==5 else tier_colour(series,tier)
             await 칭호.edit(name='⟡ '+name,colour=discord.Colour(colour),reason='관리자가 요청한 칭호 이름 변경')
             with store.connect() as db: db.execute('UPDATE titles SET name=?,hidden=?,series=?,tier=?,colour=? WHERE id=?',(name,int(숨김),series,tier,colour,row['id']))
             await organise_roles(i.guild,store,LOG)

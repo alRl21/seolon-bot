@@ -22,10 +22,16 @@ from operations_store import record
 from titles_ui import ShopPanel, setup_titles, register_commands, ADMIN_COMMANDS, TITLE_LOCK
 from titles_store import initialise_titles
 from emoji_setup import setup_emoji_permissions, NQN_ID
+from community_store import initialise_community
+from items_store import initialise_items
+from community_ui import Hub,PartyPanel,PartyView,PollPanel,PollView,CommunityWorker,setup_community,LOCK as COMMUNITY_LOCK
+from voice_rooms import voice_update,cleanup_empty_rooms,VOICE_LOCK
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
 store = Store(DATA / 'seolon.sqlite3')
 initialise_titles(store)
+initialise_community(store)
+initialise_items(store)
 log = logging.getLogger('seolon')
 lock = asyncio.Lock()
 OWNER_ID = 1119230372174123169
@@ -56,6 +62,7 @@ class Client(discord.Client):
         intents = discord.Intents.none()
         intents.guilds = True
         intents.moderation = True
+        intents.voice_states = True
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         self.tree = OwnerTree(self)
 
@@ -71,12 +78,18 @@ class Client(discord.Client):
         self.add_view(TicketPanel(store))
         self.add_view(CloseTicketView(store))
         self.add_view(ShopPanel(store))
+        self.add_view(Hub(store))
+        self.add_view(PartyPanel(store))
+        self.add_view(PartyView(store))
+        self.add_view(PollPanel(store))
+        self.add_view(PollView(store))
         await self.tree.sync(guild=discord.Object(id=GUILD_ID))
 
 
 client = Client()
 scope = discord.Object(id=GUILD_ID)
 operations = OperationsWorker(client, store, DATA)
+community = CommunityWorker(client, store)
 register_commands(client.tree, store, scope)
 
 
@@ -102,8 +115,21 @@ async def on_ready():
             if not operations.run.is_running():
                 operations.run.start()
             await setup_emoji_permissions(guild, store, log)
+            await setup_community(guild, store, log)
+            await cleanup_empty_rooms(guild, store)
+            if not community.run.is_running():
+                community.run.start()
     except Exception:
         log.exception('서버 기본 설정 적용을 완료하지 못했습니다.')
+
+
+@client.event
+async def on_voice_state_update(member,before,after):
+    if getattr(client,'closing_for_backup',False):return
+    try:
+        await voice_update(member,before,after,store,client)
+    except Exception:
+        log.exception('개인 음성방 처리 실패 · 기존 일반 채널은 삭제하지 않습니다.')
 
 
 @client.event
@@ -459,15 +485,18 @@ async def run_scheduled(token):
         except asyncio.TimeoutError:
             client.closing_for_backup = True
             operations.run.cancel()
+            community.run.cancel()
             log.warning('한국 시간 00:59 · 종료 전 백업 시작')
             guild = client.get_guild(GUILD_ID)
             async def final_backup():
                 async with lock:
                     async with TICKET_LOCK:
                         async with TITLE_LOCK:
-                            if guild is None:
-                                raise RuntimeError('서버에 연결되지 않아 종료 전 백업을 전송할 수 없습니다.')
-                            await operations.backup(guild)
+                            async with COMMUNITY_LOCK:
+                                async with VOICE_LOCK:
+                                    if guild is None:
+                                        raise RuntimeError('서버에 연결되지 않아 종료 전 백업을 전송할 수 없습니다.')
+                                    await operations.backup(guild)
             try:
                 await asyncio.wait_for(final_backup(), timeout=max(0.1, active_seconds()))
             except Exception:

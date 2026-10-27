@@ -1,15 +1,16 @@
 import discord
 
-LABELS={'titles':'── 칭호 ──','basic':'── 기본 ──','staff':'── 관리자 ──'}
+LABELS={'titles':'── 칭호 ──','basic':'── 기본 ──','staff':'── 관리자 ──','games':'── 게임 ──'}
 
 
-def group_ids(roles,title_ids,separator_ids,bot_top,everyone_id):
-    groups={'titles':[],'basic':[],'staff':[]}
+def group_ids(roles,title_ids,separator_ids,bot_top,everyone_id,game_ids=frozenset()):
+    groups={'titles':[],'basic':[],'staff':[],'games':[]}
     for role in sorted(roles,key=lambda r:(r.position,-r.id)):
         if role.id==everyone_id or role.id in separator_ids or role.managed or role>=bot_top:
             continue
         key='titles' if role.id in title_ids else ('staff' if any(getattr(role.permissions,p) for p in
             ['administrator','manage_guild','manage_roles','manage_channels','moderate_members','kick_members','ban_members']) else 'basic')
+        if role.id in game_ids:key='games'
         groups[key].append(role.id)
     return groups
 
@@ -20,12 +21,13 @@ async def organise_roles(guild,store,logger):
         title_series={r[0]:r[1] for r in title_rows}
         title_order={r[0]:(r[2],r[3],r[0]) for r in title_rows}
         title_ids=set(title_series)
+        game_ids={r[0] for r in db.execute('SELECT role FROM game_roles')} if db.execute("SELECT 1 FROM sqlite_master WHERE name='game_roles'").fetchone() else set()
         series_separators={r[0][len('roles:series:'):]:r[1] for r in db.execute("SELECT key,id FROM objects WHERE key LIKE 'roles:series:%'")}
     roles=await guild.fetch_roles()
     bot_ids={r.id for r in guild.me.roles}
     top=max(r for r in roles if r.id in bot_ids)
     separators={key:store.get('roles:separator:'+key) for key in LABELS}
-    groups=group_ids(roles,title_ids,set(separators.values()) | set(series_separators.values()),top,guild.default_role.id)
+    groups=group_ids(roles,title_ids,set(separators.values()) | set(series_separators.values()),top,guild.default_role.id,game_ids)
     for key,ids in groups.items():
         if not ids:continue
         separator=next((r for r in roles if r.id==separators[key]),None)
@@ -51,9 +53,9 @@ async def organise_roles(guild,store,logger):
     roles=await guild.fetch_roles()
     indexed={r.id:r for r in roles}
     top=max(r for r in roles if r.id in bot_ids)
-    groups=group_ids(roles,title_ids,set(separators.values()) | set(series_separators.values()),top,guild.default_role.id)
+    groups=group_ids(roles,title_ids,set(separators.values()) | set(series_separators.values()),top,guild.default_role.id,game_ids)
     desired=[]
-    for key in ['titles','basic','staff']:
+    for key in ['titles','games','basic','staff']:
         if groups[key]:
             if key=='titles':
                 for series in reversed(active_series):

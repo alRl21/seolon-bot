@@ -35,3 +35,13 @@ class ScreenTests(unittest.IsolatedAsyncioTestCase):
         await render(a,content='one');await render(b,content='two')
         a.response.send_message.assert_awaited_once();b.response.send_message.assert_awaited_once()
         a.edit_original_response.assert_not_awaited()
+    async def test_error_after_public_defer_never_overwrites_public_message(self):
+        i=self.interaction();await i.response.defer()
+        message=Mock();message.edit=AsyncMock()
+        i.followup.send=AsyncMock(return_value=message)
+        await render(i,content='개인 오류 안내')
+        i.edit_original_response.assert_not_awaited()
+        i.followup.send.assert_awaited_once()
+        self.assertTrue(i.followup.send.call_args.kwargs['ephemeral'])
+        await render(i,content='다음 안내')
+        message.edit.assert_awaited_once()

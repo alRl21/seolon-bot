@@ -25,6 +25,7 @@ def initialise_titles(store):
         columns={r[1] for r in db.execute('PRAGMA table_info(titles)')}
         if 'tier' not in columns: db.execute('ALTER TABLE titles ADD COLUMN tier INTEGER NOT NULL DEFAULT 1')
         if 'colour' not in columns: db.execute('ALTER TABLE titles ADD COLUMN colour INTEGER NOT NULL DEFAULT 0')
+        db.executescript('CREATE TABLE IF NOT EXISTS title_collections(series TEXT PRIMARY KEY,requirements TEXT NOT NULL,reward INTEGER NOT NULL UNIQUE); CREATE TABLE IF NOT EXISTS collection_claims(guild INTEGER,user INTEGER,reward INTEGER,PRIMARY KEY(guild,user,reward));')
 
 
 def rows(store, guild, user=None):
@@ -89,6 +90,8 @@ def purchase(store,guild,user,tid,now=None):
         db.execute('INSERT INTO title_owned VALUES (?,?,?,?)',(guild,user,tid,'purchase'))
         db.execute('UPDATE titles SET sold=sold+1 WHERE id=?',(tid,))
         event(db,'칭호 구매·눈송이 차감',user,user,{'칭호':name,'차감':price})
+        from collection_rewards import award_completed
+        award_completed(db,guild,user)
         return price
 
 
@@ -99,7 +102,10 @@ def grant(store,guild,user,tid,actor):
         cur=db.execute('INSERT OR IGNORE INTO title_owned VALUES (?,?,?,?)',(guild,user,tid,'grant'))
         if cur.rowcount:
             event(db,'칭호 지급',actor,user,{'칭호번호':tid})
-        return bool(cur.rowcount)
+        result=bool(cur.rowcount)
+        from collection_rewards import award_completed
+        award_completed(db,guild,user)
+        return result
 
 
 def revoke(store,guild,user,tid,actor):

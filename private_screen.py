@@ -2,6 +2,7 @@
 import time
 import asyncio
 import discord
+from types import SimpleNamespace
 
 _SESSIONS={}
 _LOCK=asyncio.Lock()
@@ -10,8 +11,16 @@ async def render(interaction,content=None,embed=None,view=None):
     payload={'content':content,'embed':embed,'view':view}
     if interaction.response.is_done() is True:
         extras=getattr(interaction,'extras',{})
-        origin=extras.get('seolon_screen_origin',interaction) if isinstance(extras,dict) else interaction
-        await origin.edit_original_response(**payload)
+        origin=extras.get('seolon_screen_origin') if isinstance(extras,dict) else None
+        private=getattr(getattr(getattr(interaction,'message',None),'flags',None),'ephemeral',False) is True
+        if origin is None and not private:
+            previous=_SESSIONS.get((interaction.guild_id,interaction.user.id))
+            if previous and time.monotonic()-previous[1]<=840:origin=previous[0]
+            elif getattr(interaction,'message',None) is not None:
+                message=await interaction.followup.send(**payload,ephemeral=True,wait=True)
+                _SESSIONS[(interaction.guild_id,interaction.user.id)]=(SimpleNamespace(edit_original_response=message.edit),time.monotonic())
+                return
+        await (origin or interaction).edit_original_response(**payload)
         return
     private=getattr(getattr(getattr(interaction,'message',None),'flags',None),'ephemeral',False) is True
     if private:
