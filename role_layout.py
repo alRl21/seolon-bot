@@ -1,10 +1,17 @@
 import discord
 
-LABELS={'titles':'～～～ ⟡ 칭호 ⟡ ～～～','basic':'── 기본 ──','staff':'── 관리자 ──','games':'── 게임 ──'}
+LABELS={'titles':'꒰ ✦ ⊹ 칭호 ⊹ ✦ ꒱','basic':'── 기본 ──','staff':'── 관리자 ──','games':'── 게임 ──'}
+TITLE_DIVIDER_COLOUR=0xD9E5F0
+SERIES_DIVIDER_COLOURS={'설월의 시':0xBFD9EF,'인연의 서약':0xD7C8EE}
 
 
 def series_label(series):
-    return '～～ 〈 '+series+' 〉 ～～'
+    return '「 ✧ '+series+' ✧ 」'
+
+
+def divider_colour(key,series=None):
+    if key=='titles':return TITLE_DIVIDER_COLOUR
+    return SERIES_DIVIDER_COLOURS.get(series,0xC9D4DF)
 
 
 def separator_safe(guild,role):
@@ -65,25 +72,29 @@ async def organise_roles(guild,store,logger):
             if any(r.name==LABELS[key] for r in roles):
                 raise ValueError('같은 이름의 역할 구분선이 있어 자동 중복 생성을 중단합니다.')
             separator=await guild.create_role(name=LABELS[key],permissions=discord.Permissions.none(),
-                hoist=False,mentionable=False,reason='소유자 요청: 역할 목록 구분선 생성 · 누구에게도 지급하지 않음')
+                colour=discord.Colour(divider_colour(key)),hoist=False,mentionable=False,
+                reason='소유자 요청: 역할 목록 구분선 생성 · 권한 없는 장식 역할')
             store.put('roles:separator:'+key,separator.id)
             separators[key]=separator.id
         if separator.permissions.value or separator.managed:
             raise ValueError('역할 구분선 권한이 변경되어 정렬을 중단합니다.')
-        if separator.name!=LABELS[key]:
-            await separator.edit(name=LABELS[key],reason='소유자 요청: 역할 구분선을 어느 화면에서나 크게 표시')
+        wanted_colour=divider_colour(key)
+        if separator.name!=LABELS[key] or separator.colour.value!=wanted_colour:
+            await separator.edit(name=LABELS[key],colour=discord.Colour(wanted_colour),reason='소유자 요청: 역할 구분선을 장식 표찰로 표시')
     active_series=sorted({title_series[rid] for rid in groups['titles']})
     for series in active_series:
         separator=next((r for r in roles if r.id==series_separators.get(series)),None)
         if separator is None:
             separator=await guild.create_role(name=series_label(series),permissions=discord.Permissions.none(),
-                hoist=False,mentionable=False,reason='소유자 요청: 칭호 세트 구분선 · 회원 미지급')
+                colour=discord.Colour(divider_colour('series',series)),hoist=False,mentionable=False,
+                reason='소유자 요청: 칭호 세트 장식 표찰 · 권한 없음')
             store.put('roles:series:'+series,separator.id)
             series_separators[series]=separator.id
         if separator.permissions.value or separator.managed:
             raise ValueError('칭호 세트 구분선 권한이 변경되어 정렬을 중단합니다.')
-        if separator.name!=series_label(series):
-            await separator.edit(name=series_label(series),reason='소유자 요청: 프로필에서도 세트가 크게 구분되도록 표시')
+        wanted_colour=divider_colour('series',series)
+        if separator.name!=series_label(series) or separator.colour.value!=wanted_colour:
+            await separator.edit(name=series_label(series),colour=discord.Colour(wanted_colour),reason='소유자 요청: 프로필 세트 표찰의 기호와 색상 통일')
     roles=await guild.fetch_roles()
     indexed={r.id:r for r in roles}
     top=max(r for r in roles if r.id in bot_ids)

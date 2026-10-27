@@ -73,8 +73,8 @@ class RoleWearTests(unittest.IsolatedAsyncioTestCase):
             member.add_roles.assert_awaited_once_with(new,reason='보유 칭호 및 자동 히든 장착')
     async def test_profile_receives_large_title_and_series_dividers(self):
         from role_layout import LABELS,series_label,sync_member_title_separators
-        self.assertEqual(LABELS['titles'],'～～～ ⟡ 칭호 ⟡ ～～～')
-        self.assertEqual(series_label('설월의 시'),'～～ 〈 설월의 시 〉 ～～')
+        self.assertEqual(LABELS['titles'],'꒰ ✦ ⊹ 칭호 ⊹ ✦ ꒱')
+        self.assertEqual(series_label('설월의 시'),'「 ✧ 설월의 시 ✧ 」')
         with tempfile.TemporaryDirectory() as tmp:
             s=Store(Path(tmp)/'db');initialise_titles(s)
             create_title(s,GUILD_ID,'a',10,'sale',100,False,9,'설월의 시')
