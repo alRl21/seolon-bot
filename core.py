@@ -1,4 +1,5 @@
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -46,8 +47,12 @@ class Store:
             CREATE TABLE IF NOT EXISTS objects (
                 key TEXT PRIMARY KEY, id INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS membership_requests (
-                user INTEGER PRIMARY KEY, requested_at TEXT NOT NULL, state TEXT NOT NULL);
+                user INTEGER PRIMARY KEY, requested_at TEXT NOT NULL, state TEXT NOT NULL,
+                last_notice_at INTEGER NOT NULL DEFAULT 0);
             ''')
+            columns = {row[1] for row in db.execute('PRAGMA table_info(membership_requests)')}
+            if 'last_notice_at' not in columns:
+                db.execute('ALTER TABLE membership_requests ADD COLUMN last_notice_at INTEGER NOT NULL DEFAULT 0')
 
     @contextmanager
     def connect(self):
@@ -65,9 +70,23 @@ class Store:
             row = db.execute('SELECT state FROM membership_requests WHERE user=?', (user,)).fetchone()
             if row and row[0] == 'pending':
                 return False
-            db.execute('INSERT OR REPLACE INTO membership_requests VALUES (?,?,?)',
+            db.execute('INSERT OR REPLACE INTO membership_requests (user,requested_at,state) VALUES (?,?,?)',
                        (user, datetime.now(ZoneInfo('Asia/Seoul')).isoformat(), 'pending'))
             return True
+
+    def reserve_membership_notice(self, user, now=None):
+        now = int(time.time()) if now is None else int(now)
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT requested_at,state,last_notice_at FROM membership_requests WHERE user=?', (user,)).fetchone()
+            if row and row[2] and now - row[2] < 600:
+                return False, min(600, row[2] + 600 - now), False
+            requested = row[0] if row and row[1] == 'pending' else datetime.now(ZoneInfo('Asia/Seoul')).isoformat()
+            repeat = bool(row and row[1] == 'pending' and row[2])
+            db.execute('INSERT INTO membership_requests (user,requested_at,state,last_notice_at) VALUES (?,?,?,?) '
+                       'ON CONFLICT(user) DO UPDATE SET requested_at=excluded.requested_at,state=excluded.state,last_notice_at=excluded.last_notice_at',
+                       (user, requested, 'pending', now))
+            return True, 0, repeat
 
     def membership_state(self, user, state):
         with self.connect() as db:

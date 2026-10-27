@@ -3,7 +3,7 @@ import discord
 from core import LAYOUT
 from membership import ADMIN_PROTECTED_IDS, OPS_CATEGORY
 
-ORDER_REQUEST = 2026102701
+ORDER_REQUEST = 2026102702
 
 
 def category_order(channels, store):

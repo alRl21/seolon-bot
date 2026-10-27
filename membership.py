@@ -1,6 +1,8 @@
 import copy
 import io
 import json
+import logging
+import time
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -17,6 +19,48 @@ OPS_CATEGORY = '── ⟡ 설온 운영실 ⟡ ──'
 ENTRY_LOG_CHANNEL_ID = 1523611752837681192
 ADMIN_PROTECTED_IDS = PROTECTED_CHANNEL_IDS - {ENTRY_LOG_CHANNEL_ID}
 CONFIG_REQUEST = 2026102703
+ADMIN_CHAT_CHANNEL_ID = 1523604140108939285
+ADMIN_CATEGORY = '── ⟡ 관리자 전용 ⟡ ──'
+ADMIN_CHAT_NAME = '﹒관리자채팅'
+ADMIN_CHAT_REQUEST = 2026102701
+
+
+async def setup_admin_chat(guild, owner_id, store, logger):
+    if store.get('admin:configured') == ADMIN_CHAT_REQUEST:
+        return
+    channels = await guild.fetch_channels()
+    chat = next((c for c in channels if c.id == ADMIN_CHAT_CHANNEL_ID), None)
+    if not isinstance(chat, discord.TextChannel):
+        raise ValueError('지정한 관리자 채팅 채널을 확인할 수 없습니다.')
+    owner = await guild.fetch_member(owner_id)
+    clan = guild.get_role(store.get('entry:clan-role') or 0)
+    if clan is None:
+        raise ValueError('클랜원 역할 설정이 먼저 필요합니다.')
+    category = next((c for c in channels if c.id == store.get('admin:category') and isinstance(c, discord.CategoryChannel)), None)
+    if category is None:
+        matches = [c for c in channels if isinstance(c, discord.CategoryChannel) and c.name == ADMIN_CATEGORY]
+        if len(matches) > 1:
+            raise ValueError('관리자 전용 카테고리가 중복되어 있습니다.')
+        category = matches[0] if matches else await guild.create_category(ADMIN_CATEGORY,
+            overwrites=view_overwrites({}, guild.default_role, clan, owner, guild.me, 'admin'),
+            reason='관리자 채팅과 가입 신청 확인을 위한 전용 카테고리 생성')
+        store.put('admin:category', category.id)
+    await category.edit(overwrites=view_overwrites(category.overwrites, guild.default_role, clan, owner, guild.me, 'admin'),
+                        reason='소유자 요청: 관리자 전용 카테고리 보기 권한')
+    await chat.edit(name=ADMIN_CHAT_NAME, category=category, sync_permissions=False,
+                    overwrites=view_overwrites(chat.overwrites, guild.default_role, clan, owner, guild.me, 'admin'),
+                    reason='소유자가 지정한 기존 관리자 채팅 채널 재사용')
+    fresh = {c.id: c for c in await guild.fetch_channels()}
+    for cid in [category.id, chat.id]:
+        c = fresh[cid]
+        if c.overwrites_for(guild.default_role).view_channel is not False or c.overwrites_for(clan).view_channel is not False:
+            raise RuntimeError('관리자 채팅 공간의 비공개 권한 확인에 실패했습니다.')
+    if fresh[chat.id].category_id != category.id:
+        raise RuntimeError('관리자 채팅 채널의 위치 확인에 실패했습니다.')
+    store.put('admin:chat', chat.id)
+    store.put('admin:configured', ADMIN_CHAT_REQUEST)
+    logger.warning('관리자 채팅 설정 완료: %s (%s) · 카테고리 %s (%s)',
+                   ADMIN_CHAT_NAME, chat.id, ADMIN_CATEGORY, category.id)
 
 
 async def configure_once(guild, owner_id, store, data, lock, require_admin, logger):
@@ -114,10 +158,37 @@ class JoinRequestView(discord.ui.View):
         if role_id and any(r.id == role_id for r in interaction.user.roles):
             await interaction.response.send_message('이미 클랜원 역할이 있습니다.', ephemeral=True)
             return
-        accepted = self.store.request_membership(interaction.user.id)
-        await interaction.response.send_message(
-            '가입 신청을 접수했습니다. 운영진이 확인한 뒤 역할을 지급합니다.' if accepted
-            else '이미 신청이 접수되어 있습니다. 운영진 확인을 기다려 주세요.', ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        channel = interaction.guild.get_channel(ADMIN_CHAT_CHANNEL_ID)
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.followup.send('관리자 알림 채널을 준비 중입니다. 잠시 후 다시 신청해 주세요.', ephemeral=True)
+            return
+        accepted, wait, repeat = self.store.reserve_membership_notice(interaction.user.id)
+        if not accepted:
+            minutes, seconds = divmod(wait, 60)
+            await interaction.followup.send(f'이미 관리자를 호출했습니다. {minutes}분 {seconds}초 후 다시 알릴 수 있습니다.', ephemeral=True)
+            return
+        # Ping real administrator roles and the server owner, never @everyone.
+        admins = [r for r in interaction.guild.roles if r.id != interaction.guild.id
+                  and r.permissions.administrator and not r.managed]
+        owner_id = interaction.guild.owner_id
+        mentions = ' '.join(r.mention for r in admins)
+        if owner_id:
+            mentions += f' <@{owner_id}>'
+        embed = discord.Embed(title='클랜 가입 신청 재알림' if repeat else '새 클랜 가입 신청', colour=0xB8C8D8,
+            description=f'신청자: <@{interaction.user.id}>\n사용자 ID: `{interaction.user.id}`\n관리자 확인을 기다리고 있습니다.')
+        embed.set_footer(text='같은 신청자의 관리자 호출은 10분에 한 번만 전달됩니다.')
+        try:
+            await channel.send(content=(mentions.strip() + '\n클랜 가입 신청을 확인해 주세요.'), embed=embed,
+                allowed_mentions=discord.AllowedMentions(everyone=False, roles=admins,
+                    users=[discord.Object(id=owner_id)] if owner_id else [], replied_user=False))
+        except discord.HTTPException:
+            logging.getLogger('seolon').exception('가입 신청 관리자 알림 전송 실패')
+            await interaction.followup.send('신청은 접수했지만 관리자 알림을 보내지 못했습니다. 운영진에게 알려 주세요. 재알림은 10분 후 가능합니다.', ephemeral=True)
+            return
+        unlock = int(time.time()) + 600
+        await interaction.followup.send('관리자 채널에 알림을 보냈습니다. 확인할 때까지 기다려 주세요.\n'
+                                       f'다음 관리자 호출: <t:{unlock}:R>', ephemeral=True)
 
 
 class GateView(discord.ui.View):

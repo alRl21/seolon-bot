@@ -204,6 +204,13 @@ class GateExecutionTests(unittest.IsolatedAsyncioTestCase):
             i.user.roles = []
             i.user.add_roles = AsyncMock()
             i.response.send_message = AsyncMock()
+            i.response.defer = AsyncMock()
+            i.followup.send = AsyncMock()
+            admin_channel = Mock(spec=discord.TextChannel)
+            admin_channel.send = AsyncMock()
+            i.guild.get_channel.return_value = admin_channel
+            i.guild.roles = []
+            i.guild.owner_id = 999
             await view.request.callback(i)
             self.assertEqual(store.pending_members()[0][0], 123)
             i.user.add_roles.assert_not_awaited()
