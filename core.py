@@ -1,5 +1,6 @@
 import sqlite3
 import time
+from operations_store import initialise, event
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -53,6 +54,7 @@ class Store:
             columns = {row[1] for row in db.execute('PRAGMA table_info(membership_requests)')}
             if 'last_notice_at' not in columns:
                 db.execute('ALTER TABLE membership_requests ADD COLUMN last_notice_at INTEGER NOT NULL DEFAULT 0')
+        initialise(self)
 
     @contextmanager
     def connect(self):
@@ -122,6 +124,7 @@ class Store:
             db.execute('INSERT INTO attendance VALUES (?,?,?,?)', (guild, user, day.isoformat(), reward))
             db.execute('INSERT INTO wallet VALUES (?,?,?) ON CONFLICT(guild,user) DO UPDATE SET balance=balance+excluded.balance',
                        (guild, user, reward))
+            event(db, '출석·눈송이 지급', user, user, {'서버':guild, '날짜':day.isoformat(), '지급':reward, '연속출석':streak})
             return reward, streak
 
     def profile(self, guild, user):

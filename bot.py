@@ -17,6 +17,8 @@ from arrange import arrange_categories
 from channel_policy import setup_channel_policy
 from attendance_ui import AttendanceView, setup_attendance
 from music_setup import setup_music_channel, setup_tts_permissions
+from operations_ui import TicketPanel, CloseTicketView, OperationsWorker, setup_operations
+from operations_store import record
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
 store = Store(DATA / 'seolon.sqlite3')
@@ -42,6 +44,7 @@ class Client(discord.Client):
     def __init__(self):
         intents = discord.Intents.none()
         intents.guilds = True
+        intents.moderation = True
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         self.tree = OwnerTree(self)
 
@@ -51,11 +54,14 @@ class Client(discord.Client):
             raise RuntimeError('설온지기의 토큰이 아닙니다. Application ID 1564477701199233125의 Bot 토큰을 확인하세요.')
         self.add_view(JoinRequestView(store))
         self.add_view(AttendanceView(store))
+        self.add_view(TicketPanel(store))
+        self.add_view(CloseTicketView(store))
         await self.tree.sync(guild=discord.Object(id=GUILD_ID))
 
 
 client = Client()
 scope = discord.Object(id=GUILD_ID)
+operations = OperationsWorker(client, store, DATA)
 
 
 @client.event
@@ -75,6 +81,9 @@ async def on_ready():
             await arrange_categories(guild, store, client.http, log)
             await setup_channel_policy(guild, OWNER_ID, store, log)
             await setup_attendance(guild, OWNER_ID, store, log)
+            await setup_operations(guild, store, log)
+            if not operations.run.is_running():
+                operations.run.start()
     except Exception:
         log.exception('서버 기본 설정 적용을 완료하지 못했습니다.')
 
@@ -88,6 +97,29 @@ async def on_guild_role_create(role):
             await setup_tts_permissions(role.guild, store, log)
     except Exception:
         log.exception('카미봇 초대 후 접근권한 적용 실패')
+
+
+@client.event
+async def on_audit_log_entry_create(entry):
+    if entry.guild.id != GUILD_ID:
+        return
+    if entry.action in {discord.AuditLogAction.member_role_update, discord.AuditLogAction.role_create,
+                         discord.AuditLogAction.role_update, discord.AuditLogAction.role_delete,
+                         discord.AuditLogAction.channel_create, discord.AuditLogAction.channel_update,
+                         discord.AuditLogAction.channel_delete, discord.AuditLogAction.overwrite_create,
+                         discord.AuditLogAction.overwrite_update, discord.AuditLogAction.overwrite_delete}:
+        record(store, '서버 변경 기록', entry.user_id or 0, getattr(entry.target,'id',0) or 0,
+               {'동작':entry.action.name, 'Discord감사기록':entry.id})
+
+
+@client.tree.command(name='백업', description='관리자 전용 채널에 데이터 백업을 추가 저장합니다', guild=scope)
+@app_commands.default_permissions(administrator=True)
+async def manual_backup(interaction: discord.Interaction):
+    require_owner(interaction)
+    await interaction.response.defer(ephemeral=True)
+    async with lock:
+        await operations.backup(interaction.guild, force=True)
+    await interaction.followup.send('데이터 백업과 무결성 확인 완료. 관리자 전용 백업 채널에 저장했어요.', ephemeral=True)
 
 
 def require_admin(interaction):
@@ -320,6 +352,7 @@ async def change_clan_role(interaction, member, add):
     else:
         await member.remove_roles(role, reason='설온 소유자 요청으로 클랜원 역할 회수')
         store.membership_state(member.id, 'removed')
+    record(store, '클랜원 역할 지급' if add else '클랜원 역할 회수', interaction.user.id, member.id, {'역할':role.id})
     await interaction.followup.send(f'{member.display_name}: {role.name} 역할 {"지급" if add else "회수"} 완료. 채널 보기가 자동으로 바뀝니다.', ephemeral=True)
 
 
