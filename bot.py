@@ -13,6 +13,7 @@ from core import GUILD_ID, LAYOUT, Store, PROTECTED_CHANNEL_IDS, ARCHIVE_NAME, V
 from schedule import active_seconds
 from reset_ui import show_reset
 from membership import show_gate, JoinRequestView, safe_clan_role, configure_once
+from arrange import arrange_categories
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
 store = Store(DATA / 'seolon.sqlite3')
@@ -61,6 +62,11 @@ async def on_ready():
         return
     log.warning('설온지기 연결 완료 · 서버: %s · 소유자 전용 명령어 준비 완료', guild.name)
     await configure_once(guild, OWNER_ID, store, DATA, lock, require_admin, log)
+    try:
+        async with lock:
+            await arrange_categories(guild, store, client.http, log)
+    except Exception:
+        log.exception('카테고리 순서 적용을 완료하지 못했습니다.')
 
 
 def require_admin(interaction):
@@ -318,6 +324,16 @@ async def membership_requests(interaction: discord.Interaction):
     text = '\n'.join(f'<@{user}> · ID {user} · {date[:16]}' for user, date in rows)
     await interaction.response.send_message('가입 신청 (먼저 접수된 25명)\n' + (text or '대기 중인 신청이 없습니다.')
                                            + '\n/클랜원지급에서 대상을 선택하면 승인됩니다.', ephemeral=True)
+
+
+@client.tree.command(name='채널정렬', description='보호 구역 바로 아래 입장 공간과 본 채널 순서를 정렬합니다', guild=scope)
+@app_commands.default_permissions(administrator=True)
+async def arrange(interaction: discord.Interaction):
+    require_admin(interaction)
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    async with lock:
+        await arrange_categories(interaction.guild, store, client.http, log, force=True)
+    await interaction.followup.send('보호 구역 바로 아래에 입장 공간과 설온 본 채널을 순서대로 배치했습니다.', ephemeral=True)
 
 
 @client.tree.command(name='여권', description='내 출석과 눈꽃 잔액을 확인합니다', guild=scope)
