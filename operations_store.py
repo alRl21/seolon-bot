@@ -11,6 +11,9 @@ def initialise(store):
           id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL,
           kind TEXT NOT NULL, actor INTEGER NOT NULL, subject INTEGER NOT NULL,
           details TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS ticket_archives (
+          ticket INTEGER PRIMARY KEY, channel INTEGER NOT NULL, actor INTEGER NOT NULL,
+          created_at TEXT NOT NULL, links TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tickets (
           id INTEGER PRIMARY KEY AUTOINCREMENT, guild INTEGER NOT NULL, user INTEGER NOT NULL,
           channel INTEGER, status TEXT NOT NULL, created_at TEXT NOT NULL,

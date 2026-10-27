@@ -17,7 +17,7 @@ from arrange import arrange_categories
 from channel_policy import setup_channel_policy
 from attendance_ui import AttendanceView, setup_attendance
 from music_setup import setup_music_channel, setup_tts_permissions
-from operations_ui import TicketPanel, CloseTicketView, OperationsWorker, setup_operations
+from operations_ui import TicketPanel, CloseTicketView, OperationsWorker, setup_operations, TICKET_LOCK
 from operations_store import record
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
@@ -37,6 +37,8 @@ def require_owner(interaction):
 class OwnerTree(app_commands.CommandTree):
     async def interaction_check(self, interaction):
         require_owner(interaction)
+        if getattr(interaction.client, 'closing_for_backup', False) is True:
+            raise app_commands.CheckFailure('종료 전 백업 중입니다. 내일 오전 7시 이후 이용하세요.')
         return True
 
 
@@ -52,6 +54,9 @@ class Client(discord.Client):
         application = await self.application_info()
         if application.id != APPLICATION_ID:
             raise RuntimeError('설온지기의 토큰이 아닙니다. Application ID 1564477701199233125의 Bot 토큰을 확인하세요.')
+        available = application.flags.gateway_message_content or application.flags.gateway_message_content_limited
+        self._connection._intents.message_content = bool(available)
+        log.warning('문의 대화 기록 권한: %s', '활성' if available else '비활성 · 내용 누락 시 문의 삭제 차단')
         self.add_view(JoinRequestView(store))
         self.add_view(AttendanceView(store))
         self.add_view(TicketPanel(store))
@@ -434,9 +439,23 @@ async def run_scheduled(token):
         return
     async with client:
         try:
-            await asyncio.wait_for(client.start(token), timeout=seconds)
+            await asyncio.wait_for(client.start(token), timeout=max(1, seconds - 60) if seconds > 60 else max(1, min(10, seconds / 2)))
         except asyncio.TimeoutError:
-            log.warning('한국 시간 자정입니다. 연결을 닫고 프로세스를 종료합니다.')
+            client.closing_for_backup = True
+            operations.run.cancel()
+            log.warning('한국 시간 23:59 · 종료 전 백업 시작')
+            guild = client.get_guild(GUILD_ID)
+            async def final_backup():
+                async with lock:
+                    async with TICKET_LOCK:
+                        if guild is None:
+                            raise RuntimeError('서버에 연결되지 않아 종료 전 백업을 전송할 수 없습니다.')
+                        await operations.backup(guild)
+            try:
+                await asyncio.wait_for(final_backup(), timeout=max(0.1, active_seconds()))
+            except Exception:
+                log.exception('종료 전 백업 전송 실패 · 생성된 로컬 사본 유지')
+            log.warning('종료 전 백업 단계 종료 · Discord 연결을 닫고 프로세스를 종료합니다.')
 
 
 if __name__ == '__main__':

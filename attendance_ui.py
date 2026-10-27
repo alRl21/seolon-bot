@@ -15,6 +15,9 @@ class AttendanceView(discord.ui.View):
         self.store = store
 
     async def interaction_check(self, interaction):
+        if getattr(interaction.client, 'closing_for_backup', False) is True:
+            await interaction.response.send_message('종료 전 백업 중이에요. 내일 오전 7시 이후 출석해 주세요.', ephemeral=True)
+            return False
         if not eligible(interaction):
             await interaction.response.send_message('클랜원 역할을 받은 회원만 사용할 수 있어요.', ephemeral=True)
             return False

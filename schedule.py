@@ -11,3 +11,8 @@ def active_seconds(now=None):
         return 0
     midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return (midnight - now).total_seconds()
+
+
+def nightly_backup_due(now=None):
+    now = datetime.now(KST) if now is None else now.astimezone(KST)
+    return now.hour == 23 and now.minute == 59

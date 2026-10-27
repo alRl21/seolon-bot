@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 import discord
 from discord.ext import tasks
 from core import GUILD_ID, PROTECTED_CHANNEL_IDS
+from ticket_archive import archive_ticket
+from schedule import nightly_backup_due
 from membership import CLAN_ROLE_ID
 from channel_policy import readonly_overwrites
 from operations_store import initialise, record, active_ticket, reserve_ticket, activate_ticket, close_ticket, backup_database
@@ -46,6 +48,9 @@ class CloseTicketView(discord.ui.View):
 
     @discord.ui.button(label='문의 종료', custom_id='seolon:ticket-close:v1', style=discord.ButtonStyle.secondary)
     async def close(self, interaction, button):
+        if getattr(interaction.client, 'closing_for_backup', False) is True:
+            await interaction.response.send_message('종료 전 백업 중이에요. 내일 오전 7시 이후 이용해 주세요.', ephemeral=True)
+            return
         if interaction.guild_id != GUILD_ID or not staff(interaction.user):
             await interaction.response.send_message('관리자만 문의를 종료할 수 있어요.', ephemeral=True)
             return
@@ -57,21 +62,44 @@ class CloseTicketView(discord.ui.View):
             if row is None:
                 await interaction.followup.send('이미 종료했거나 문의 채널이 아니에요.', ephemeral=True)
                 return
-            if interaction.channel_id in PROTECTED_CHANNEL_IDS:
-                raise ValueError('보호 채널에서는 문의를 종료하지 않습니다.')
-            # Use the stored member overwrite; departed users need no new overwrite.
-            overwrite = next((v for t,v in interaction.channel.overwrites.items() if t.id == row[1]), None)
-            if overwrite:
-                existing = interaction.channel.overwrites
-                for target, value in existing.items():
-                    if target.id == row[1]:
+            if (interaction.channel_id in PROTECTED_CHANNEL_IDS or
+                    interaction.channel.category_id in PROTECTED_CHANNEL_IDS or
+                    interaction.channel.category_id != self.store.get('support:category') or
+                    interaction.channel.topic != f'seolon-ticket:{row[0]}:{row[1]}'):
+                await interaction.followup.send('등록된 문의 채널을 확인할 수 없어 종료하지 않았어요.', ephemeral=True)
+                return
+            destination = interaction.guild.get_channel(self.store.get('support:log') or 0)
+            if destination is None:
+                await interaction.followup.send('관리자 기록 채널을 찾지 못해 문의 채널을 유지했어요.', ephemeral=True)
+                return
+            original_overwrites = None
+            try:
+                require_private_channel(destination, interaction.guild)
+                original_overwrites = interaction.channel.overwrites
+                frozen = {target: discord.PermissionOverwrite.from_pair(*v.pair()) for target,v in original_overwrites.items()}
+                for target,value in frozen.items():
+                    if target.id != interaction.guild.me.id:
                         value.send_messages = value.send_messages_in_threads = False
                         value.create_public_threads = value.create_private_threads = False
-                await interaction.channel.edit(overwrites=existing, name=f'종료-{row[0]:04d}',
-                                               reason='관리자가 문의 종료 · 기존 대화 보존')
-            close_ticket(self.store, interaction.channel_id, interaction.user.id)
-            await interaction.channel.send('문의가 종료됐어요. 대화 기록은 이 채널에 보관됩니다.', allowed_mentions=discord.AllowedMentions.none())
-            await interaction.followup.send('문의 종료 완료. 대화는 삭제하지 않았어요.', ephemeral=True)
+                await interaction.channel.edit(overwrites=frozen, reason='문의 대화 기록 중 새 메시지 방지')
+                await archive_ticket(interaction.channel, row[0], row[1], interaction.user.id, self.store, destination)
+                # Recheck immediately before the only destructive operation.
+                fresh = await interaction.guild.fetch_channel(interaction.channel_id)
+                if (fresh.id in PROTECTED_CHANNEL_IDS or fresh.category_id != self.store.get('support:category') or
+                        fresh.topic != f'seolon-ticket:{row[0]}:{row[1]}'):
+                    raise ValueError('문의 채널 보호 검사 실패. 삭제하지 않았습니다.')
+                await fresh.delete(reason=f'관리자 요청 문의 #{row[0]} 종료 · 대화/첨부파일 보관 완료')
+                close_ticket(self.store, interaction.channel_id, interaction.user.id)
+                await interaction.followup.send('대화와 첨부파일을 관리자 운영기록에 저장하고 문의 채널을 삭제했어요.', ephemeral=True)
+            except Exception as exc:
+                LOG.exception('문의 보관·종료 중단 · 원본 채널 보존')
+                if original_overwrites is not None:
+                    try:
+                        await interaction.channel.edit(overwrites=original_overwrites, reason='문의 종료 중단 · 작성 권한 복원')
+                    except discord.HTTPException:
+                        LOG.exception('문의 작성 권한 복원 실패 또는 이미 삭제됨')
+                await interaction.followup.send(f'종료 처리 중단: {str(exc)[:500]}\n기록 보관이나 삭제를 완료하지 못한 채널은 유지돼요.', ephemeral=True)
+
 
 
 class TicketModal(discord.ui.Modal, title='비공개 문의'):
@@ -84,6 +112,9 @@ class TicketModal(discord.ui.Modal, title='비공개 문의'):
         self.store = store
 
     async def on_submit(self, interaction):
+        if getattr(interaction.client, 'closing_for_backup', False) is True:
+            await interaction.response.send_message('종료 전 백업 중이에요. 내일 오전 7시 이후 이용해 주세요.', ephemeral=True)
+            return
         if interaction.guild_id != GUILD_ID or interaction.user.bot:
             return
         if not staff(interaction.user) and not any(r.id == CLAN_ROLE_ID for r in interaction.user.roles):
@@ -141,6 +172,9 @@ class TicketPanel(discord.ui.View):
 
     @discord.ui.button(label='문의하기', custom_id='seolon:ticket-open:v1', style=discord.ButtonStyle.primary)
     async def open(self, interaction, button):
+        if getattr(interaction.client, 'closing_for_backup', False) is True:
+            await interaction.response.send_message('종료 전 백업 중이에요. 내일 오전 7시 이후 이용해 주세요.', ephemeral=True)
+            return
         if interaction.guild_id != GUILD_ID or interaction.user.bot:
             return
         if not staff(interaction.user) and not any(r.id == CLAN_ROLE_ID for r in interaction.user.roles):
@@ -176,11 +210,21 @@ async def setup_operations(guild, store, logger):
     panel_permissions = {**private, clan: discord.PermissionOverwrite(view_channel=True, read_message_history=True)}
     panel_permissions = readonly_overwrites(panel_permissions, guild.default_role, clan, owner, guild.me)
     panel = await ensure('support:panel-channel', '﹒문의', utility, panel_permissions)
-    if not store.get('support:panel-message'):
+    if store.get('support:panel-version') != 2:
         embed = discord.Embed(title='문의', colour=0xB8C8D8,
-            description='운영진에게 문의하거나 문제를 신고할 수 있어요.\n버튼을 누르면 본인과 관리자만 보는 채널이 열려요.\n진행 중인 문의는 한 개, 새 문의는 10분 간격으로 만들 수 있어요.\n종료 후에도 대화는 보관돼요.')
-        message = await panel.send(embed=embed, view=TicketPanel(store))
-        store.put('support:panel-message', message.id)
+            description='운영진에게 문의하거나 문제를 신고할 수 있어요.\n버튼을 누르면 본인과 관리자만 보는 채널이 열려요.\n진행 중인 문의는 한 개, 새 문의는 10분 간격으로 만들 수 있어요.\n종료 시 대화·첨부파일을 관리자 기록에 보관하고 문의 채널은 삭제해요.')
+        message = None
+        if store.get('support:panel-message'):
+            try:
+                message = await panel.fetch_message(store.get('support:panel-message'))
+            except discord.NotFound:
+                pass
+        if message:
+            await message.edit(embed=embed, view=TicketPanel(store))
+        else:
+            message = await panel.send(embed=embed, view=TicketPanel(store))
+            store.put('support:panel-message', message.id)
+        store.put('support:panel-version', 2)
     # Recover interrupted reservations. An API-created channel carries a stable topic.
     with store.connect() as db:
         creating = db.execute("SELECT id,user FROM tickets WHERE status='creating'").fetchall()
@@ -192,11 +236,17 @@ async def setup_operations(guild, store, logger):
         else:
             with store.connect() as db:
                 db.execute("UPDATE tickets SET status='failed' WHERE id=?",(tid,))
+    with store.connect() as db:
+        interrupted = db.execute("SELECT t.channel,a.actor FROM tickets t JOIN ticket_archives a ON a.ticket=t.id WHERE t.status='open'").fetchall()
+    live_ids = {c.id for c in channels}
+    for channel_id, actor in interrupted:
+        if channel_id not in live_ids:
+            close_ticket(store, channel_id, actor)
     fresh = {c.id:c for c in await guild.fetch_channels()}
     for cid in [category.id,audit.id,backup.id]:
         if fresh[cid].overwrites_for(guild.default_role).view_channel is not False:
             raise RuntimeError('문의·운영기록·백업 비공개 검증 실패')
-    logger.warning('비공개 문의·운영기록·백업 채널 설정 확인 완료 · 문의 패널 %s', panel.id)
+    logger.warning('문의 종료 시 대화 보관 후 삭제 · 자동 백업 KST 23:59 후 종료 · 문의 패널 %s', panel.id)
 
 
 class OperationsWorker:
@@ -208,7 +258,7 @@ class OperationsWorker:
         guild = self.client.get_guild(GUILD_ID)
         if not guild or not self.store.get('support:backup'):
             return
-        for action in [self.flush, self.backup]:
+        for action in [self.flush]:
             try:
                 await action(guild)
             except Exception:
@@ -229,8 +279,8 @@ class OperationsWorker:
 
     async def backup(self, guild, force=False):
         now = datetime.now(ZoneInfo('Asia/Seoul'))
-        slot = int(now.strftime('%Y%m%d')) * 10 + now.hour // 6
-        if not force and self.store.get('backup:last-slot') == slot:
+        day = int(now.strftime('%Y%m%d'))
+        if not force and (not nightly_backup_due(now) or self.store.get('backup:last-night') == day):
             return
         channel = guild.get_channel(self.store.get('support:backup') or 0)
         if channel is None or channel.overwrites_for(guild.default_role).view_channel is not False:
@@ -249,8 +299,9 @@ class OperationsWorker:
                 'position':c.position,'overwrites':[{'id':t.id,'type':'role' if isinstance(t,discord.Role) else 'member',
                     'allow':v.pair()[0].value,'deny':v.pair()[1].value} for t,v in c.overwrites.items()]})
         files = [discord.File(path), discord.File(io.BytesIO(json.dumps(structure,ensure_ascii=False,indent=2).encode()),filename='structure.json')]
-        await channel.send(f'자동 백업 · {now:%Y-%m-%d %H:%M} KST\n출석·눈송이·문의 상태·운영 기록 DB + 채널 구조/권한\n문의 대화 본문은 Discord 문의 채널에 보관되며 이 DB에는 포함되지 않습니다.', files=files,
+        await channel.send(f'{"수동 백업" if force else "종료 전 백업"} · {now:%Y-%m-%d %H:%M} KST\n출석·눈송이·문의 상태·운영 기록 DB + 채널 구조/권한\n종료된 문의의 대화·첨부파일은 관리자 운영기록의 보관 파일을 확인하세요.', files=files,
                            allowed_mentions=discord.AllowedMentions.none())
-        self.store.put('backup:last-slot',slot)
+        if not force:
+            self.store.put('backup:last-night', day)
         LOG.warning('데이터 자동 백업 완료 · SQLite 무결성 확인 · 관리자 전용 채널에 별도 사본 전송')
         return path
