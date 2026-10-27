@@ -2,6 +2,7 @@ import discord
 from core import GUILD_ID, PROTECTED_CHANNEL_IDS
 from membership import CLAN_ROLE_ID
 from channel_policy import readonly_overwrites
+from private_screen import render
 
 
 def eligible(interaction):
@@ -25,7 +26,7 @@ class AttendanceView(discord.ui.View):
 
     @discord.ui.button(label='오늘 출석하기', style=discord.ButtonStyle.primary, custom_id='seolon:attendance:v1')
     async def attend(self, interaction, button):
-        await interaction.response.defer(ephemeral=True)
+        await render(interaction,content='출석을 확인하는 중이에요.',view=None)
         result = self.store.attend(interaction.guild_id, interaction.user.id)
         balance, days = self.store.profile(interaction.guild_id, interaction.user.id)
         if result is None:
@@ -34,7 +35,7 @@ class AttendanceView(discord.ui.View):
             reward, streak = result
             text = (f'⟡ 오늘의 출석 완료\n눈송이 +{reward:,}개\n'
                     f'연속 출석 {streak}일 · 누적 출석 {days}일\n보유 눈송이 {balance:,}개')
-        await interaction.followup.send(text, ephemeral=True)
+        await render(interaction,content=text,view=AttendanceView(self.store))
 
     @discord.ui.button(label='내 눈송이', style=discord.ButtonStyle.secondary, custom_id='seolon:wallet:v1')
     async def wallet(self, interaction, button):
@@ -45,14 +46,14 @@ class AttendanceView(discord.ui.View):
         embed.add_field(name='누적 출석', value=f'{days}일')
         embed.add_field(name='연속 출석', value=f'{streak}일')
         embed.add_field(name='오늘 출석', value='완료' if today else '아직 출석하지 않았어요', inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await render(interaction,embed=embed,view=AttendanceView(self.store))
 
     async def on_error(self, interaction, error, item):
         import logging
         logging.getLogger('seolon').exception('출석 버튼 처리 실패', exc_info=error)
         text = '처리 중 문제가 생겼어요. 잠시 후 다시 눌러 주세요. 출석 보상은 중복 지급되지 않아요.'
         if interaction.response.is_done():
-            await interaction.followup.send(text, ephemeral=True)
+            await render(interaction,content=text,view=AttendanceView(self.store))
         else:
             await interaction.response.send_message(text, ephemeral=True)
 

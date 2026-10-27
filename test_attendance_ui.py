@@ -16,18 +16,31 @@ class AttendanceUITests(unittest.IsolatedAsyncioTestCase):
             i.user.id = 123
             i.user.bot = False
             i.user.roles = [Mock(id=CLAN_ROLE_ID)]
+            from private_screen import _SESSIONS
+            _SESSIONS.clear()
+            i.extras={}
+            i.message.flags.ephemeral=False
+            state={'done':False}
+            i.response.is_done.side_effect=lambda:state['done']
+            async def respond(*args,**kwargs): state['done']=True
+            i.response.edit_message=AsyncMock(side_effect=respond)
+            i.edit_original_response=AsyncMock()
             i.response.defer = AsyncMock()
-            i.response.send_message = AsyncMock()
+            i.response.send_message = AsyncMock(side_effect=respond)
             i.followup.send = AsyncMock()
             view = AttendanceView(store)
             self.assertTrue(await view.interaction_check(i))
             await view.attend.callback(i)
+            state['done']=False
+            i.message.flags.ephemeral=True
             await view.attend.callback(i)
             self.assertEqual(store.profile(GUILD_ID, 123), (30, 1))
-            self.assertIn('이미 출석', i.followup.send.call_args.args[0])
-            self.assertTrue(i.followup.send.call_args.kwargs['ephemeral'])
+            self.assertIn('이미 출석', i.edit_original_response.call_args.kwargs['content'])
+            i.followup.send.assert_not_awaited()
+            state['done']=False
             await view.wallet.callback(i)
-            self.assertTrue(i.response.send_message.call_args.kwargs['ephemeral'])
+            self.assertIsNotNone(i.response.edit_message.call_args.kwargs['embed'])
+            i.response.send_message.assert_awaited_once()
             i.user.roles = []
             self.assertFalse(await view.interaction_check(i))
             i.guild_id = 999

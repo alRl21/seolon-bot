@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from core import GUILD_ID, PROTECTED_CHANNEL_IDS
 from role_layout import organise_roles
+from private_screen import render
 from membership import CLAN_ROLE_ID
 from operations_store import record
 from titles_store import initialise_titles, rows, get_title, create_title, configure_sale, purchase, grant, revoke, equipped, KINDS
@@ -96,7 +97,7 @@ class ShopPanel(discord.ui.View):
     async def interaction_check(self,i):
         try: available(i)
         except ValueError as exc:
-            await i.response.send_message(str(exc),ephemeral=True)
+            await render(i,content=str(exc),view=MenuHome(self.store,i.user.id))
             return False
         return True
 
@@ -111,35 +112,59 @@ class ShopPanel(discord.ui.View):
 
     @discord.ui.button(label='칭호 해제',style=discord.ButtonStyle.secondary,custom_id='seolon:titles:clear:v1')
     async def clear(self,i,button):
-        await i.response.defer(ephemeral=True)
+        await render(i,content='칭호를 해제하는 중이에요.',view=None)
         async with TITLE_LOCK:
             available(i)
             await wear(i,self.store,None)
-        await i.followup.send('칭호를 해제했어요. 보유 칭호는 그대로 남아 있어요.',ephemeral=True)
+        await render(i,content='칭호를 해제했어요. 보유 칭호는 그대로 남아 있어요.',view=MenuHome(self.store,i.user.id))
 
     async def on_error(self,i,error,item):
         LOG.exception('칭호 버튼 처리 실패',exc_info=error)
         text=str(error)[:500] if isinstance(error,ValueError) else '처리하지 못했어요. 역할 권한을 확인해 주세요.'
-        if i.response.is_done(): await i.followup.send(text,ephemeral=True)
-        else: await i.response.send_message(text,ephemeral=True)
+        await render(i,content=text,view=MenuHome(self.store,i.user.id))
+
+
+def member_choices(store,user,mode):
+    return rows(store,GUILD_ID,user) if mode=='owned' else [r for r in rows(store,GUILD_ID) if not r['hidden']]
+
+
+def add_home_button(view,store,user):
+    button=discord.ui.Button(label='메뉴')
+    async def home(i):
+        balance,_=store.profile(GUILD_ID,user)
+        await render(i,content=f'칭호 메뉴 · 보유 눈송이 {balance:,}개',view=MenuHome(store,user))
+    button.callback=home;view.add_item(button)
+
+
+class MenuHome(ShopPanel):
+    def __init__(self,store,user):
+        super().__init__(store)
+        self.user=user
+        self.timeout=300
+
+    async def interaction_check(self,i):
+        if i.user.id!=self.user:return False
+        return await super().interaction_check(i)
 
 
 async def show_series(i,store,choices,mode):
     if not choices:
         await show_picker(i,store,choices,mode)
         return
-    await i.response.send_message('먼저 칭호 세트를 선택해 주세요.',view=SeriesPicker(store,choices,mode,i.user.id),ephemeral=True)
+    await render(i,content='먼저 칭호 세트를 선택해 주세요.',view=SeriesPicker(store,choices,mode,i.user.id))
 
 
 class SeriesPicker(discord.ui.View):
     def __init__(self,store,choices,mode,user,page=0):
         super().__init__(timeout=300)
         self.user=user
+        self.store=store
         series=sorted({r['series'] for r in choices})
         select=discord.ui.Select(placeholder='칭호 세트 선택',options=[discord.SelectOption(label=name,value=name) for name in series[page*25:(page+1)*25]])
         async def select_series(i):
             await show_picker(i,store,[r for r in choices if r['series']==select.values[0]],mode)
         select.callback=select_series;self.add_item(select)
+        add_home_button(self,store,user)
         if len(series)>25:
             for label,offset in [('이전',-1),('다음',1)]:
                 button=discord.ui.Button(label=label,disabled=not 0<=page+offset<((len(series)+24)//25))
@@ -165,9 +190,14 @@ class TitlePicker(discord.ui.View):
         async def pick(i):
             row=get_title(store,GUILD_ID,int(select.values[0]))
             if row is None: raise ValueError('칭호가 없습니다.')
-            await i.response.send_message(embed=detail_embed(row),view=TitleAction(store,row['id'],user,mode),ephemeral=True)
+            await render(i,embed=detail_embed(row),view=TitleAction(store,row['id'],user,mode))
         select.callback=pick
         self.add_item(select)
+        back=discord.ui.Button(label='세트 목록')
+        async def go_back(i):
+            await show_series(i,store,member_choices(store,user,mode),mode)
+        back.callback=go_back;self.add_item(back)
+        add_home_button(self,store,user)
         if len(choices)>25:
             for label,offset in [('이전',-1),('다음',1)]:
                 b=discord.ui.Button(label=label,disabled=not 0<=page+offset<((len(choices)+24)//25))
@@ -189,7 +219,7 @@ class TitleAction(TitlePicker):
         self.store,self.tid,self.user=store,tid,user
         buy=discord.ui.Button(label='구매하기' if mode=='shop' else '착용하기',style=discord.ButtonStyle.primary)
         async def act(i):
-            await i.response.defer(ephemeral=True)
+            await i.response.defer()
             async with TITLE_LOCK:
                 available(i)
                 row=get_title(store,GUILD_ID,tid)
@@ -202,8 +232,21 @@ class TitleAction(TitlePicker):
                 else:
                     await wear(i,store,tid)
                     text=f"{row['name']} 착용 완료"
-            await i.followup.send(text.replace('\\n','\n'),ephemeral=True)
-        buy.callback=act;self.add_item(buy)
+            await render(i,content=text.replace('\\n','\n'),view=MenuHome(store,user))
+        buy.callback=act
+        row=get_title(store,GUILD_ID,tid)
+        owned=any(r['id']==tid for r in rows(store,GUILD_ID,user))
+        if mode=='shop' and row and (row['kind']=='grant' or not row['selling'] or owned):
+            buy.disabled=True
+            buy.label='이미 보유 중' if owned else '구매 불가'
+        self.add_item(buy)
+        back=discord.ui.Button(label='칭호 목록')
+        async def go_back(i):
+            fresh=get_title(store,GUILD_ID,tid)
+            choices=member_choices(store,user,mode)
+            await show_picker(i,store,[r for r in choices if fresh and r['series']==fresh['series']],mode)
+        back.callback=go_back;self.add_item(back)
+        add_home_button(self,store,user)
 
 
 def detail_embed(row):
@@ -222,10 +265,10 @@ def detail_embed(row):
 
 async def show_picker(i,store,choices,mode):
     if not choices:
-        await i.response.send_message('아직 보유한 칭호가 없어요.' if mode=='owned' else '등록된 칭호가 없어요.',ephemeral=True)
+        await render(i,content='아직 보유한 칭호가 없어요.' if mode=='owned' else '등록된 칭호가 없어요.',view=MenuHome(store,i.user.id))
         return
-    await i.response.send_message('칭호를 선택해 주세요. 여러 개를 보유하고 하나만 착용할 수 있어요.',
-                                  view=TitlePicker(store,choices,mode,i.user.id),ephemeral=True)
+    await render(i,content='칭호를 선택해 주세요. 여러 개를 보유하고 하나만 착용할 수 있어요.',
+                 view=TitlePicker(store,choices,mode,i.user.id))
 
 
 async def new_role_title(guild,store,name,kind,price,hidden,actor,series='기타',tier=1):
