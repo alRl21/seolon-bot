@@ -15,6 +15,7 @@ ENTRY_CATEGORY = '── ⟡ 설온의 문 앞 ⟡ ──'
 ENTRY_LOG = '﹒입장로그'
 ENTRY_ROLE = '﹒역할받기'
 CLAN_ROLE = '클랜원'
+CLAN_ROLE_ID = 1522946198984593541
 OPS_CATEGORY = '── ⟡ 설온 운영실 ⟡ ──'
 ENTRY_LOG_CHANNEL_ID = 1523611752837681192
 ADMIN_PROTECTED_IDS = PROTECTED_CHANNEL_IDS - {ENTRY_LOG_CHANNEL_ID}
@@ -23,6 +24,43 @@ ADMIN_CHAT_CHANNEL_ID = 1523604140108939285
 ADMIN_CATEGORY = '── ⟡ 관리자 전용 ⟡ ──'
 ADMIN_CHAT_NAME = '﹒관리자채팅'
 ADMIN_CHAT_REQUEST = 2026102701
+
+
+async def correct_clan_role(guild, owner_id, store, logger):
+    """Use the exact existing role authorized by the owner, regardless of hierarchy."""
+    if store.get('entry:exact-role-applied') == CLAN_ROLE_ID:
+        return
+    roles = await guild.fetch_roles()
+    role = next((r for r in roles if r.id == CLAN_ROLE_ID), None)
+    if role is None or role.permissions.administrator:
+        raise ValueError('지정한 클랜원 역할이 없거나 관리자 권한 때문에 채널 숨김을 적용할 수 없습니다.')
+    owner = await guild.fetch_member(owner_id)
+    channels = await guild.fetch_channels()
+    if not PROTECTED_CHANNEL_IDS <= {c.id for c in channels}:
+        raise ValueError('보호 채널을 모두 확인할 수 없습니다.')
+    modes = {}
+    for channel in channels:
+        mode = entry_mode(channel, guild, store)
+        if channel.id in {store.get('admin:category'), ADMIN_CHAT_CHANNEL_ID}:
+            mode = 'admin'
+        if mode in {'main', 'admin', 'entry'}:
+            modes[channel.id] = mode
+            await channel.edit(overwrites=view_overwrites(channel.overwrites, guild.default_role,
+                role, owner, guild.me, mode, readonly=mode == 'entry'),
+                reason='소유자가 지정한 실제 클랜원 역할 1522946198984593541로 접근권한 수정')
+    fresh = {c.id: c for c in await guild.fetch_channels()}
+    for cid, mode in modes.items():
+        channel = fresh[cid]
+        if (channel.overwrites_for(role).view_channel is not (mode == 'main') or
+                channel.overwrites_for(guild.default_role).view_channel is not (mode == 'entry')):
+            raise RuntimeError(f'{cid}: 실제 클랜원 역할 접근권한 검증 실패')
+        for target, overwrite in channel.overwrites.items():
+            if target.id not in {role.id, owner.id, guild.me.id, guild.default_role.id} and overwrite.view_channel is True:
+                raise RuntimeError(f'{cid}: 이전 역할 접근 허용이 남아 있습니다.')
+    store.put('entry:clan-role', role.id)
+    store.put('entry:exact-role-applied', role.id)
+    logger.warning('실제 클랜원 역할 수정 완료: %s (%s) · %s개 채널/카테고리 검증 · 역할 지급 가능: %s',
+                   role.name, role.id, len(modes), not role.managed and role < guild.me.top_role)
 
 
 async def setup_admin_chat(guild, owner_id, store, logger):
@@ -227,7 +265,7 @@ class GateView(discord.ui.View):
                     raise ValueError('봇에 역할 관리·채널 관리 권한이 필요합니다.')
                 if guild.default_role.permissions.administrator:
                     raise ValueError('@everyone에 관리자 권한이 있어 채널 숨김이 불가능합니다. 기본 역할의 관리자 권한을 먼저 해제하세요.')
-                matches = [r for r in guild.roles if r.id == self.store.get('entry:clan-role')]
+                matches = [r for r in guild.roles if r.id == (CLAN_ROLE_ID if self.store.get('entry:exact-role-applied') else self.store.get('entry:clan-role'))]
                 if not matches:
                     matches = [r for r in guild.roles if r.name == CLAN_ROLE]
                 if len(matches) > 1:
@@ -251,7 +289,7 @@ class GateView(discord.ui.View):
                     if not safe_clan_role(role) or role.managed or role >= bot_top:
                         raise ValueError('전용 클랜원 역할이 설온지기의 관리 범위를 벗어납니다. 역할 순서를 확인하세요.')
                     self.logger.warning('기존 역할을 유지하고 전용 역할 사용: %s (%s)', role.name, role.id)
-                elif not safe_clan_role(role) or role.managed or role >= guild.me.top_role:
+                elif role.id != CLAN_ROLE_ID and (not safe_clan_role(role) or role.managed or role >= guild.me.top_role):
                     raise ValueError('클랜원 역할은 관리 권한이 없어야 하고 설온지기 역할보다 아래에 있어야 합니다.')
                 self.store.put('entry:clan-role', role.id)
                 self.data.mkdir(parents=True, exist_ok=True)

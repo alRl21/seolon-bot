@@ -12,7 +12,7 @@ from discord import app_commands
 from core import GUILD_ID, LAYOUT, Store, PROTECTED_CHANNEL_IDS, ARCHIVE_NAME, VOICE_NAMES
 from schedule import active_seconds
 from reset_ui import show_reset
-from membership import show_gate, JoinRequestView, safe_clan_role, configure_once, setup_admin_chat
+from membership import show_gate, JoinRequestView, safe_clan_role, configure_once, setup_admin_chat, correct_clan_role
 from arrange import arrange_categories
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
@@ -64,6 +64,7 @@ async def on_ready():
     await configure_once(guild, OWNER_ID, store, DATA, lock, require_admin, log)
     try:
         async with lock:
+            await correct_clan_role(guild, OWNER_ID, store, log)
             await setup_admin_chat(guild, OWNER_ID, store, log)
             await arrange_categories(guild, store, client.http, log)
     except Exception:
