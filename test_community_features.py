@@ -4,11 +4,11 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock,AsyncMock
+from unittest.mock import Mock,AsyncMock,patch
 import discord
 from core import Store,GUILD_ID,PROTECTED_CHANNEL_IDS
 from titles_store import initialise_titles,create_title,grant,purchase,rows,revoke
-from collection_rewards import claim_completed
+from collection_rewards import claim_completed,sync_hidden_roles,grant_owner_test_titles
 from community_store import initialise_community,create_party,join_party,party_members,create_poll,vote,counts,close_item
 from items_store import initialise_items,item_rows,buy_item,redeem_voucher,use_theme,grant_voucher
 from voice_rooms import cleanup_room,voice_update
@@ -21,26 +21,34 @@ class CommunityDatabaseTests(unittest.TestCase):
     def tearDown(self):self.tmp.cleanup()
     def collection(self):
         titles=[create_title(self.s,1,str(n),50+n,'sale',100,False,9,'세트') for n in range(4)]
+        grant_only=create_title(self.s,1,'지급전용',70,'grant',0,False,9,'기념')
         reward=create_title(self.s,1,'히든',60,'grant',0,True,9,'세트')
         with self.s.connect() as db:
             db.execute('UPDATE titles SET tier=5 WHERE id=?',(reward,))
             db.execute('INSERT INTO title_collections VALUES (?,?,?)',('세트',json.dumps(titles),reward))
-        return titles,reward
-    def test_four_owned_auto_awards_hidden_once_in_purchase_transaction(self):
-        titles,reward=self.collection()
+        return titles,grant_only,reward
+    def test_all_purchasable_and_one_grant_awards_then_new_title_revokes_hidden(self):
+        titles,grant_only,reward=self.collection()
         for title in titles[:3]:purchase(self.s,1,2,title)
         self.assertNotIn(reward,{r['id'] for r in rows(self.s,1,2)})
         purchase(self.s,1,2,titles[3])
+        self.assertNotIn(reward,{r['id'] for r in rows(self.s,1,2)})
+        grant(self.s,1,2,grant_only,9)
         self.assertIn(reward,{r['id'] for r in rows(self.s,1,2)})
         with ThreadPoolExecutor(max_workers=6) as pool:self.assertTrue(all(not v for v in pool.map(lambda _:claim_completed(self.s,1,2),range(6))))
         self.assertEqual(self.s.profile(1,2)[0],9600)
-        revoke(self.s,1,2,reward,9)
+        new_title=create_title(self.s,1,'새 구매형',80,'sale',100,False,9,'새 세트')
         self.assertEqual(claim_completed(self.s,1,2),[])
-        with self.s.connect() as db:self.assertEqual(db.execute('SELECT count(*) FROM collection_claims').fetchone()[0],1)
+        self.assertNotIn(reward,{r['id'] for r in rows(self.s,1,2)})
+        with self.s.connect() as db:self.assertEqual(db.execute('SELECT count(*) FROM collection_claims').fetchone()[0],0)
+        purchase(self.s,1,2,new_title)
+        self.assertIn(reward,{r['id'] for r in rows(self.s,1,2)})
     def test_grants_also_award_and_restart_preserves_collection(self):
-        titles,reward=self.collection()
+        titles,grant_only,reward=self.collection()
         for title in titles:grant(self.s,1,2,title,9)
-        self.assertEqual(len(rows(Store(self.s.path),1,2)),5)
+        self.assertNotIn(reward,{r['id'] for r in rows(self.s,1,2)})
+        grant(self.s,1,2,grant_only,9)
+        self.assertEqual(len(rows(Store(self.s.path),1,2)),6)
         self.assertEqual(self.s.profile(1,2)[0],10000)
     def test_party_last_slot_is_atomic_and_cannot_join_after_start(self):
         pid=create_party(self.s,1,'롤',200,2,'',now=100)
@@ -77,14 +85,16 @@ class CommunityDatabaseTests(unittest.TestCase):
         self.assertEqual(len(rows(self.s,1,2)),1)
         with self.assertRaises(ValueError):redeem_voucher(self.s,1,2,voucher['id'],title)
         self.assertEqual(item_rows(self.s,2),[])
-    def test_voucher_redeems_grant_hidden_and_limited_titles(self):
+    def test_voucher_redeems_grant_and_limited_but_hidden_is_condition_only(self):
         grant_voucher(self.s,9,2,3)
         voucher=next(r for r in item_rows(self.s,2) if r['kind']=='voucher')
         for n,kind,hidden in [(0,'grant',False),(1,'sale',True),(2,'limited',False)]:
             title=create_title(self.s,1,str(n),50+n,kind,100,hidden,9)
-            redeem_voucher(self.s,1,2,voucher['id'],title)
-        self.assertEqual(item_rows(self.s,2),[])
-        self.assertEqual(len(rows(self.s,1,2)),3)
+            if hidden:
+                with self.assertRaises(ValueError):redeem_voucher(self.s,1,2,voucher['id'],title)
+            else:redeem_voucher(self.s,1,2,voucher['id'],title)
+        self.assertEqual(item_rows(self.s,2)[0]['quantity'],1)
+        self.assertEqual(len(rows(self.s,1,2)),2)
     def test_permanent_theme_no_double_charge_and_applies(self):
         theme=next(r for r in item_rows(self.s) if r['kind']=='theme')
         buy_item(self.s,1,2,theme['id']);use_theme(self.s,2,theme['id'])
@@ -96,6 +106,46 @@ class CommunityDatabaseTests(unittest.TestCase):
         item=item_rows(self.s)[0];buy_item(self.s,1,2,item['id'])
         dest=Path(self.tmp.name)/'snapshot';backup_database(self.s,dest)
         self.assertEqual(item_rows(Store(dest),2)[0]['quantity'],1)
+
+
+class HiddenRoleSyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_hidden_role_is_added_and_removed_when_new_sale_title_appears(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(Path(tmp)/'db');initialise_titles(s)
+            sale=create_title(s,1,'구매형',10,'sale',100,False,9)
+            given=create_title(s,1,'지급형',11,'grant',0,False,9)
+            reward=create_title(s,1,'히든',12,'grant',0,True,9)
+            with s.connect() as db:
+                db.execute('UPDATE titles SET tier=5 WHERE id=?',(reward,))
+                db.execute('INSERT INTO title_collections VALUES (?,?,?)',('세트',json.dumps([sale]),reward))
+            with s.connect() as db:db.execute('INSERT INTO wallet VALUES (1,2,1000)')
+            purchase(s,1,2,sale);grant(s,1,2,given,9)
+            hidden_role=Mock();hidden_role.id=12
+            member=Mock();member.id=2;member.roles=[];member.add_roles=AsyncMock();member.remove_roles=AsyncMock()
+            guild=Mock();guild.id=1;guild.fetch_member=AsyncMock(return_value=member);guild.get_role.return_value=hidden_role
+            with patch('titles_ui.role_safe'):
+                await sync_hidden_roles(guild,s,{2})
+            member.add_roles.assert_awaited_once()
+            create_title(s,1,'새 구매형',13,'sale',100,False,9)
+            claim_completed(s,1,2);member.roles=[hidden_role]
+            with patch('titles_ui.role_safe'):
+                await sync_hidden_roles(guild,s,{2})
+            member.remove_roles.assert_awaited_once()
+
+    async def test_owner_gets_all_current_titles_only_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(Path(tmp)/'db');initialise_titles(s)
+            create_title(s,1,'하나',10,'sale',100,False,9)
+            create_title(s,1,'둘',11,'grant',0,False,9)
+            role_a,role_b=Mock(),Mock();role_a.id,role_b.id=10,11
+            member=Mock();member.roles=[];member.add_roles=AsyncMock()
+            guild=Mock();guild.id=1;guild.fetch_member=AsyncMock(return_value=member)
+            guild.get_role.side_effect=lambda rid:{10:role_a,11:role_b}[rid]
+            with patch('titles_ui.role_safe'):
+                await grant_owner_test_titles(guild,s,99,Mock())
+                await grant_owner_test_titles(guild,s,99,Mock())
+            self.assertEqual({r['id'] for r in rows(s,1,99)},{1,2})
+            member.add_roles.assert_awaited_once()
 
 class VoiceRoomTests(unittest.IsolatedAsyncioTestCase):
     async def test_cleanup_only_bot_owned_empty_room_never_protected(self):

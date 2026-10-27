@@ -70,7 +70,7 @@ class RoleWearTests(unittest.IsolatedAsyncioTestCase):
             with patch('titles_ui.role_safe'):
                 await wear(i,s,b)
             member.remove_roles.assert_awaited_once_with(old,reason='보유 칭호 변경 · 장식 역할만 변경')
-            member.add_roles.assert_awaited_once_with(new,reason='보유 칭호 착용')
+            member.add_roles.assert_awaited_once_with(new,reason='보유 칭호 및 자동 히든 장착')
     async def test_regular_member_not_allowed_admin_commands(self):
         i=Mock();i.guild_id=GUILD_ID;i.user.id=2;i.permissions.administrator=False;i.client.closing_for_backup=False
         with self.assertRaises(discord.app_commands.CheckFailure):admin(i)

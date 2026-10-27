@@ -64,20 +64,27 @@ async def wear(i,store,tid):
     selected=get_title(store,GUILD_ID,tid) if tid is not None else None
     new=i.guild.get_role(selected['role']) if selected else None
     if selected: role_safe(i.guild,new)
+    from collection_rewards import automatic_hidden_ids
+    automatic_titles=automatic_hidden_ids(store,GUILD_ID,member.id)
+    automatic_roles={r['role'] for r in registered if r['id'] in automatic_titles}
+    if selected and selected['id'] in automatic_titles:tid=None;selected=None;new=None
     ids={r['role'] for r in registered}
+    expected=set(automatic_roles)
+    if new is not None:expected.add(new.id)
     previous=[r for r in member.roles if r.id in ids]
     for role in previous: role_safe(i.guild,role)
     removed=[]
     try:
         for role in previous:
-            if new is None or role.id!=new.id:
+            if role.id not in expected:
                 await member.remove_roles(role,reason='보유 칭호 변경 · 장식 역할만 변경')
                 removed.append(role)
-        if new is not None and new not in member.roles:
-            await member.add_roles(new,reason='보유 칭호 착용')
+        additions=[i.guild.get_role(rid) for rid in expected if all(r.id!=rid for r in member.roles)]
+        for role in additions:role_safe(i.guild,role)
+        if additions:await member.add_roles(*additions,reason='보유 칭호 및 자동 히든 장착')
         fresh=await i.guild.fetch_member(member.id)
         actual={r.id for r in fresh.roles if r.id in ids}
-        if actual!=({new.id} if new else set()): raise ValueError('칭호 역할 적용 확인 실패')
+        if actual!=expected: raise ValueError('칭호 역할 적용 확인 실패')
         equipped(store,GUILD_ID,member.id,tid)
     except Exception:
         try:
@@ -232,6 +239,8 @@ class TitleAction(TitlePicker):
                 role_safe(i.guild,i.guild.get_role(row['role']))
                 if mode=='shop':
                     amount=purchase(store,GUILD_ID,i.user.id,tid)
+                    from collection_rewards import sync_hidden_roles
+                    await sync_hidden_roles(i.guild,store,{i.user.id})
                     balance,_=store.profile(GUILD_ID,i.user.id)
                     text=f"{row['name']} 구매 완료 · 눈송이 -{amount:,}개\\n남은 눈송이 {balance:,}개\\n‘내 칭호’에서 착용할 수 있어요."
                 else:
@@ -244,6 +253,8 @@ class TitleAction(TitlePicker):
         if mode=='shop' and row and (row['kind']=='grant' or not row['selling'] or owned):
             buy.disabled=True
             buy.label='이미 보유 중' if owned else '구매 불가'
+        if mode!='shop' and row and row['tier']==5:
+            buy.disabled=True;buy.label='조건 충족 시 자동 장착'
         self.add_item(buy)
         back=discord.ui.Button(label='칭호 목록')
         async def go_back(i):
@@ -257,7 +268,8 @@ class TitleAction(TitlePicker):
 def detail_embed(row):
     import time
     desc='세트: '+row['series']+(' · 히든\n' if row.get('tier')==5 else f" · {row.get('tier',1)}단계\n")+KINDS[row['kind']]
-    if row['kind']=='grant': desc+=' · 관리자 지급으로만 획득'
+    if row.get('tier')==5:desc+=' · 전체 구매형 칭호와 지급 전용 칭호 1개 이상 보유 시 자동 장착'
+    elif row['kind']=='grant': desc+=' · 관리자 지급으로만 획득'
     else:
         desc+=f"\n가격: {row['price']:,}눈송이"
         if not row['selling']: desc+='\n판매 중지'
@@ -377,15 +389,17 @@ async def setup_titles(guild,store,logger):
             embed=discord.Embed(title='칭호 상점',colour=0xB8C8D8,description='눈송이로 칭호를 모아 보세요.\n여러 칭호를 보유하고, 한 번에 하나만 착용할 수 있어요.\n상시 판매 · 기간/수량 한정 판매 · 관리자 지급 전용\n판매가 끝나도 이미 얻은 칭호는 계속 사용할 수 있어요.\n상점과 보유 칭호는 아래 버튼으로 확인하세요.')
             m=await channel.send(embed=embed,view=ShopPanel(store))
             store.put('titles:panel',m.id)
-    if store.get('titles:panel-version')!=3:
+    if store.get('titles:panel-version')!=4:
         channel=guild.get_channel(store.get('text:┊눈꽃상점') or 0)
         message=await channel.fetch_message(store.get('titles:panel'))
-        embed=discord.Embed(title='상점',colour=0xB8C8D8,description='눈송이로 칭호와 아이템을 구매하세요.\n상점 → 칭호 / 아이템 · 구매한 물건은 내 가방에서 사용\n칭호 교환권은 상점에서 판매하지 않는 관리자 지급 전용 특별권이에요.\n교환권으로는 보유하지 않은 모든 칭호 중 하나를 선택할 수 있어요.\n칭호 도감의 4개를 완성하면 히든 칭호도 획득해요.')
+        embed=discord.Embed(title='상점',colour=0xB8C8D8,description='눈송이로 칭호와 아이템을 구매하세요.\n상점 → 칭호 / 아이템 · 구매한 물건은 내 가방에서 사용\n칭호 교환권은 상점에서 판매하지 않는 관리자 지급 전용 특별권이에요.\n교환권은 히든을 제외한 미보유 칭호 하나와 교환할 수 있어요.\n구매 가능한 칭호 전체와 지급 전용 칭호 1개 이상을 모으면 히든 칭호가 자동 장착돼요. 새 칭호가 추가되어 조건이 부족해지면 다시 회수됩니다.')
         await message.edit(embed=embed,view=ShopPanel(store))
-        store.put('titles:panel-version',3)
+        store.put('titles:panel-version',4)
     from collection_rewards import ensure_collections
     await ensure_collections(guild,store,logger)
     await organise_roles(guild,store,logger)
+    from collection_rewards import grant_owner_test_titles
+    await grant_owner_test_titles(guild,store,OWNER_ID,logger)
     verified_roles={r.id:r for r in await guild.fetch_roles()}
     for title in rows(store,GUILD_ID):
         role_safe(guild,verified_roles.get(title['role']))
@@ -463,7 +477,10 @@ def register_commands(tree,store,scope):
         row=next((r for r in rows(store,GUILD_ID) if r['role']==칭호.id),None)
         if row is None: raise ValueError('등록된 칭호 역할을 선택하세요.')
         role_safe(i.guild,칭호)
-        async with TITLE_LOCK: result=grant(store,GUILD_ID,대상.id,row['id'],i.user.id)
+        async with TITLE_LOCK:
+            result=grant(store,GUILD_ID,대상.id,row['id'],i.user.id)
+            from collection_rewards import sync_hidden_roles
+            await sync_hidden_roles(i.guild,store,{대상.id})
         await i.response.send_message('보유 목록에 지급했어요. 받은 회원이 내 칭호에서 착용하면 돼요.' if result else '이미 보유한 칭호입니다.',ephemeral=True)
 
     @tree.command(name='칭호회수',description='지정한 칭호만 회수합니다. 눈송이는 자동 환불하지 않습니다',guild=scope)
@@ -478,4 +495,6 @@ def register_commands(tree,store,scope):
             member=await i.guild.fetch_member(대상.id)
             if 칭호 in member.roles: await member.remove_roles(칭호,reason='관리자 요청 칭호 회수')
             revoke(store,GUILD_ID,대상.id,row['id'],i.user.id)
+            from collection_rewards import sync_hidden_roles
+            await sync_hidden_roles(i.guild,store,{대상.id})
         await i.followup.send('칭호를 회수했어요. 눈송이는 자동 환불하지 않습니다.',ephemeral=True)

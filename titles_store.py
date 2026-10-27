@@ -110,9 +110,12 @@ def grant(store,guild,user,tid,actor):
 
 def revoke(store,guild,user,tid,actor):
     with store.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
         db.execute('DELETE FROM title_equipped WHERE guild=? AND user=? AND title=?',(guild,user,tid))
         db.execute('DELETE FROM title_owned WHERE guild=? AND user=? AND title=?',(guild,user,tid))
         event(db,'칭호 회수',actor,user,{'칭호번호':tid})
+        from collection_rewards import award_completed
+        award_completed(db,guild,user)
 
 
 def equipped(store,guild,user,tid):

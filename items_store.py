@@ -61,9 +61,10 @@ def redeem_voucher(store,guild,user,item,title):
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         voucher=db.execute('SELECT i.kind,i.value,b.quantity FROM shop_items i JOIN item_bag b ON b.item=i.id AND b.user=? WHERE i.id=?',(user,item)).fetchone()
-        target=db.execute('SELECT name FROM titles WHERE guild=? AND id=?',(guild,title)).fetchone()
+        target=db.execute('SELECT name,hidden FROM titles WHERE guild=? AND id=?',(guild,title)).fetchone()
         if voucher is None or voucher[0]!='voucher' or voucher[2]<1:raise ValueError('교환권이 없어요.')
         if target is None:raise ValueError('등록된 칭호가 아닙니다.')
+        if target[1]:raise ValueError('히든 칭호는 전체 구매형 칭호와 지급 전용 칭호를 모아야 얻을 수 있어요.')
         if db.execute('SELECT 1 FROM title_owned WHERE guild=? AND user=? AND title=?',(guild,user,title)).fetchone():raise ValueError('이미 가진 칭호예요. 교환권은 사용하지 않았어요.')
         db.execute('UPDATE item_bag SET quantity=quantity-1 WHERE user=? AND item=?',(user,item))
         db.execute('INSERT INTO title_owned VALUES (?,?,?,?)',(guild,user,title,'voucher'))
