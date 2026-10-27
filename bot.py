@@ -46,7 +46,7 @@ class OwnerTree(app_commands.CommandTree):
         else:
             require_owner(interaction)
         if getattr(interaction.client, 'closing_for_backup', False) is True:
-            raise app_commands.CheckFailure('종료 전 백업 중입니다. 내일 오전 7시 이후 이용하세요.')
+            raise app_commands.CheckFailure('종료 전 백업 중입니다. 오전 7시 재시작 후 이용하세요.')
         return True
 
 
@@ -329,7 +329,7 @@ async def design(interaction: discord.Interaction):
 async def attendance(interaction: discord.Interaction):
     result = store.attend(interaction.guild_id, interaction.user.id)
     if result is None:
-        text = '오늘은 이미 출석했어요. 내일 오전 7시 이후 다시 만나요.'
+        text = '오늘은 이미 출석했어요. 한국 시간 자정 이후 다시 만나요.'
     else:
         reward, streak = result
         text = f'⟡ 출석 완료! 눈송이 +{reward}\n연속 출석 {streak}일'
@@ -446,7 +446,7 @@ async def command_error(interaction: discord.Interaction, error: app_commands.Ap
 async def run_scheduled(token):
     seconds = active_seconds()
     if seconds <= 0:
-        log.warning('한국 시간 00:00~07:00 휴식 시간입니다. 프로세스를 종료합니다.')
+        log.warning('한국 시간 01:00~07:00 휴식 시간입니다. 프로세스를 종료합니다.')
         return
     async with client:
         try:
@@ -454,7 +454,7 @@ async def run_scheduled(token):
         except asyncio.TimeoutError:
             client.closing_for_backup = True
             operations.run.cancel()
-            log.warning('한국 시간 23:59 · 종료 전 백업 시작')
+            log.warning('한국 시간 00:59 · 종료 전 백업 시작')
             guild = client.get_guild(GUILD_ID)
             async def final_backup():
                 async with lock:

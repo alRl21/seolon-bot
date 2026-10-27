@@ -17,7 +17,7 @@ class AttendanceView(discord.ui.View):
 
     async def interaction_check(self, interaction):
         if getattr(interaction.client, 'closing_for_backup', False) is True:
-            await interaction.response.send_message('종료 전 백업 중이에요. 내일 오전 7시 이후 출석해 주세요.', ephemeral=True)
+            await interaction.response.send_message('종료 전 백업 중이에요. 오전 7시 재시작 후 출석해 주세요.', ephemeral=True)
             return False
         if not eligible(interaction):
             await interaction.response.send_message('클랜원 역할을 받은 회원만 사용할 수 있어요.', ephemeral=True)
@@ -59,7 +59,7 @@ class AttendanceView(discord.ui.View):
 
 
 async def setup_attendance(guild, owner_id, store, logger):
-    if store.get('attendance:panel-version') == 1:
+    if store.get('attendance:panel-version') == 2:
         return
     channels = await guild.fetch_channels()
     cid = store.get('text:﹒출석체크')
@@ -79,7 +79,7 @@ async def setup_attendance(guild, owner_id, store, logger):
         description='하루 한 번, 설온에 발자국을 남겨 주세요.\n출석하면 재화 **눈송이**를 받을 수 있어요.')
     embed.add_field(name='매일의 선물', value='출석할 때마다 눈송이 30개', inline=False)
     embed.add_field(name='꾸준함의 선물', value='연속 7일마다 +100개\n연속 30일마다 +500개\n보너스는 기본 보상에 추가되며, 겹치는 날에는 모두 지급돼요.', inline=False)
-    embed.add_field(name='출석 안내', value='한국 시간 기준 하루 한 번 · 매일 자정 초기화\n봇 운영 시간 오전 7시~밤 12시\n하루를 빠지면 연속 기록은 다시 1일부터 시작해요.\n보유 눈송이와 누적 출석은 유지돼요.', inline=False)
+    embed.add_field(name='출석 안내', value='한국 시간 기준 하루 한 번 · 매일 자정 초기화\n봇 운영 시간 오전 7시~다음 날 오전 1시\n하루를 빠지면 연속 기록은 다시 1일부터 시작해요.\n보유 눈송이와 누적 출석은 유지돼요.', inline=False)
     message_id = store.get('attendance:panel')
     message = None
     if message_id:
@@ -96,5 +96,5 @@ async def setup_attendance(guild, owner_id, store, logger):
     for target, value in expected.items():
         if fresh.overwrites_for(target).pair() != value.pair():
             raise RuntimeError('출석 채널 권한 확인 실패')
-    store.put('attendance:panel-version', 1)
+    store.put('attendance:panel-version', 2)
     logger.warning('눈송이 출석 시스템 적용 완료: 채널 %s · 패널 %s · 클랜원 역할 %s · 매일30/7일100/30일500', channel.id, message.id, role.id)

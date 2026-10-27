@@ -36,7 +36,7 @@ ADMIN_COMMANDS={'칭호생성','칭호판매설정','칭호판매중지','칭호
 
 def admin(i):
     if getattr(i.client,'closing_for_backup',False) is True:
-        raise app_commands.CheckFailure('종료 전 백업 중입니다. 내일 오전 7시 이후 이용하세요.')
+        raise app_commands.CheckFailure('종료 전 백업 중입니다. 오전 7시 재시작 후 이용하세요.')
     if i.guild_id!=GUILD_ID or not (i.user.id==OWNER_ID or i.permissions.administrator):
         raise app_commands.CheckFailure('서버 관리자만 칭호를 관리할 수 있습니다.')
 
@@ -53,7 +53,7 @@ def available(i):
     if i.guild_id!=GUILD_ID or i.user.bot or not any(r.id==CLAN_ROLE_ID for r in i.user.roles):
         raise ValueError('클랜원만 사용할 수 있어요.')
     if getattr(i.client,'closing_for_backup',False) is True:
-        raise ValueError('종료 전 백업 중이에요. 내일 오전 7시 이후 이용해 주세요.')
+        raise ValueError('종료 전 백업 중이에요. 오전 7시 재시작 후 이용해 주세요.')
 
 
 async def wear(i,store,tid):

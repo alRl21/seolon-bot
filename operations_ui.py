@@ -49,7 +49,7 @@ class CloseTicketView(discord.ui.View):
     @discord.ui.button(label='문의 종료', custom_id='seolon:ticket-close:v1', style=discord.ButtonStyle.secondary)
     async def close(self, interaction, button):
         if getattr(interaction.client, 'closing_for_backup', False) is True:
-            await interaction.response.send_message('종료 전 백업 중이에요. 내일 오전 7시 이후 이용해 주세요.', ephemeral=True)
+            await interaction.response.send_message('종료 전 백업 중이에요. 오전 7시 재시작 후 이용해 주세요.', ephemeral=True)
             return
         if interaction.guild_id != GUILD_ID or not staff(interaction.user):
             await interaction.response.send_message('관리자만 문의를 종료할 수 있어요.', ephemeral=True)
@@ -113,7 +113,7 @@ class TicketModal(discord.ui.Modal, title='비공개 문의'):
 
     async def on_submit(self, interaction):
         if getattr(interaction.client, 'closing_for_backup', False) is True:
-            await interaction.response.send_message('종료 전 백업 중이에요. 내일 오전 7시 이후 이용해 주세요.', ephemeral=True)
+            await interaction.response.send_message('종료 전 백업 중이에요. 오전 7시 재시작 후 이용해 주세요.', ephemeral=True)
             return
         if interaction.guild_id != GUILD_ID or interaction.user.bot:
             return
@@ -173,7 +173,7 @@ class TicketPanel(discord.ui.View):
     @discord.ui.button(label='문의하기', custom_id='seolon:ticket-open:v1', style=discord.ButtonStyle.primary)
     async def open(self, interaction, button):
         if getattr(interaction.client, 'closing_for_backup', False) is True:
-            await interaction.response.send_message('종료 전 백업 중이에요. 내일 오전 7시 이후 이용해 주세요.', ephemeral=True)
+            await interaction.response.send_message('종료 전 백업 중이에요. 오전 7시 재시작 후 이용해 주세요.', ephemeral=True)
             return
         if interaction.guild_id != GUILD_ID or interaction.user.bot:
             return
@@ -246,7 +246,7 @@ async def setup_operations(guild, store, logger):
     for cid in [category.id,audit.id,backup.id]:
         if fresh[cid].overwrites_for(guild.default_role).view_channel is not False:
             raise RuntimeError('문의·운영기록·백업 비공개 검증 실패')
-    logger.warning('문의 종료 시 대화 보관 후 삭제 · 자동 백업 KST 23:59 후 종료 · 문의 패널 %s', panel.id)
+    logger.warning('문의 종료 시 대화 보관 후 삭제 · 자동 백업 KST 00:59 후 종료 · 문의 패널 %s', panel.id)
 
 
 class OperationsWorker:

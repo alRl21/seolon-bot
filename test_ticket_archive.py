@@ -87,5 +87,5 @@ class ArchiveTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(db.execute('SELECT count(*) FROM ticket_archives').fetchone()[0],0)
 
     def test_backup_only_in_final_minute_kst(self):
-        for hour,minute,expected in [(7,0,False),(12,0,False),(18,0,False),(23,58,False),(23,59,True),(0,0,False)]:
+        for hour,minute,expected in [(7,0,False),(12,0,False),(18,0,False),(23,59,False),(0,58,False),(0,59,True),(1,0,False)]:
             self.assertEqual(nightly_backup_due(datetime(2026,10,27,hour,minute,tzinfo=KST)),expected)
