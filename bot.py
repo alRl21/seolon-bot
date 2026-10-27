@@ -293,7 +293,7 @@ async def change_clan_role(interaction, member, add):
     else:
         await member.remove_roles(role, reason='설온 소유자 요청으로 클랜원 역할 회수')
         store.membership_state(member.id, 'removed')
-    await interaction.followup.send(f'{member.display_name}: 클랜원 역할 {"지급" if add else "회수"} 완료. 채널 보기가 자동으로 바뀝니다.', ephemeral=True)
+    await interaction.followup.send(f'{member.display_name}: {role.name} 역할 {"지급" if add else "회수"} 완료. 채널 보기가 자동으로 바뀝니다.', ephemeral=True)
 
 
 @client.tree.command(name='클랜원지급', description='선택한 회원에게 클랜원 역할을 지급합니다', guild=scope)

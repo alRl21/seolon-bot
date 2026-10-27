@@ -16,7 +16,7 @@ CLAN_ROLE = '클랜원'
 OPS_CATEGORY = '── ⟡ 설온 운영실 ⟡ ──'
 ENTRY_LOG_CHANNEL_ID = 1523611752837681192
 ADMIN_PROTECTED_IDS = PROTECTED_CHANNEL_IDS - {ENTRY_LOG_CHANNEL_ID}
-CONFIG_REQUEST = 2026102702
+CONFIG_REQUEST = 2026102703
 
 
 async def configure_once(guild, owner_id, store, data, lock, require_admin, logger):
@@ -164,7 +164,23 @@ class GateView(discord.ui.View):
                 role = matches[0] if matches else await guild.create_role(
                     name=CLAN_ROLE, permissions=discord.Permissions.none(), colour=discord.Colour(0xB8C8D8),
                     reason='소유자가 승인한 클랜원 접근 역할 생성')
-                if not safe_clan_role(role) or role.managed or role >= guild.me.top_role:
+                if (not safe_clan_role(role) or role.managed or role >= guild.me.top_role) and not self.store.get('entry:clan-role'):
+                    # Do not modify old higher/privileged roles. Use a new ordinary role
+                    # below the bot so the owner does not need to rearrange legacy roles.
+                    alternatives = [r for r in guild.roles if r.name == '✧ 클랜원']
+                    if len(alternatives) > 1:
+                        raise ValueError('✧ 클랜원 역할이 중복되어 있습니다. 중복 역할을 확인하세요.')
+                    role = alternatives[0] if alternatives else await guild.create_role(
+                        name='✧ 클랜원', permissions=discord.Permissions.none(), colour=discord.Colour(0xB8C8D8),
+                        reason='기존 역할을 유지하고 봇이 관리할 수 있는 전용 클랜원 역할 생성')
+                    fresh_roles = await guild.fetch_roles()
+                    bot_role_ids = {r.id for r in guild.me.roles}
+                    bot_top = max(r for r in fresh_roles if r.id in bot_role_ids)
+                    role = next(r for r in fresh_roles if r.id == role.id)
+                    if not safe_clan_role(role) or role.managed or role >= bot_top:
+                        raise ValueError('전용 클랜원 역할이 설온지기의 관리 범위를 벗어납니다. 역할 순서를 확인하세요.')
+                    self.logger.warning('기존 역할을 유지하고 전용 역할 사용: %s (%s)', role.name, role.id)
+                elif not safe_clan_role(role) or role.managed or role >= guild.me.top_role:
                     raise ValueError('클랜원 역할은 관리 권한이 없어야 하고 설온지기 역할보다 아래에 있어야 합니다.')
                 self.store.put('entry:clan-role', role.id)
                 self.data.mkdir(parents=True, exist_ok=True)
@@ -250,6 +266,7 @@ class GateView(discord.ui.View):
                 # No existing users are silently assigned membership.
                 await interaction.followup.send(
                     f'입장 설정 완료 · 본 채널 {count}개 항목 접근권한 설정\n'
+                    f'접근 역할: {role.name}\n'
                     '신규: 입장로그·역할받기 → 클랜원 역할 지급 후: 본 채널\n'
                     '기존 회원에게 역할을 자동 지급하지 않았습니다. /가입신청목록, /클랜원지급을 사용하세요.\n'
                     + '기존 입장 로그 채널은 메시지를 보존해 재사용하고, 나머지 보호 3개는 관리자 전용으로 설정했습니다.'

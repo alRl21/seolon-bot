@@ -89,7 +89,7 @@ class MembershipPersistenceTests(unittest.TestCase):
 
 
 class GateExecutionTests(unittest.IsolatedAsyncioTestCase):
-    async def scenario(self):
+    async def scenario(self, legacy_high_role=False):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         store = Store(Path(tmp.name) / 'db')
@@ -104,6 +104,16 @@ class GateExecutionTests(unittest.IsolatedAsyncioTestCase):
         everyone.permissions = discord.Permissions.none()
         guild.me = bot
         guild.roles = []
+        if legacy_high_role:
+            old_role = MagicMock()
+            old_role.name = '클랜원'
+            old_role.id = 555
+            old_role.permissions = discord.Permissions.none()
+            old_role.managed = False
+            old_role.__ge__.return_value = True
+            guild.roles = [old_role]
+            bot.roles = [bot]
+            guild.fetch_roles = AsyncMock(return_value=[clan, bot])
         guild.system_channel_flags = discord.SystemChannelFlags()
         guild.create_role = AsyncMock(return_value=clan)
         guild.edit = AsyncMock()
@@ -197,3 +207,10 @@ class GateExecutionTests(unittest.IsolatedAsyncioTestCase):
             await view.request.callback(i)
             self.assertEqual(store.pending_members()[0][0], 123)
             i.user.add_roles.assert_not_awaited()
+
+    async def test_unmanageable_old_role_uses_new_safe_role(self):
+        pins, main, store, everyone, clan, interaction = await self.scenario(legacy_high_role=True)
+        self.assertIn('입장 설정 완료', interaction.followup.send.call_args.args[0])
+        self.assertEqual(store.get('entry:clan-role'), clan.id)
+        self.assertEqual(interaction.guild.create_role.call_args.kwargs['name'], '✧ 클랜원')
+        self.assertEqual(interaction.guild.create_role.call_args.kwargs['permissions'].value, 0)
