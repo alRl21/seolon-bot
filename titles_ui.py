@@ -85,6 +85,8 @@ async def wear(i,store,tid):
         fresh=await i.guild.fetch_member(member.id)
         actual={r.id for r in fresh.roles if r.id in ids}
         if actual!=expected: raise ValueError('칭호 역할 적용 확인 실패')
+        from role_layout import sync_member_title_separators
+        await sync_member_title_separators(i.guild,store,fresh,expected)
         equipped(store,GUILD_ID,member.id,tid)
     except Exception:
         try:
@@ -398,7 +400,8 @@ async def setup_titles(guild,store,logger):
     from collection_rewards import ensure_collections
     await ensure_collections(guild,store,logger)
     await organise_roles(guild,store,logger)
-    from collection_rewards import grant_owner_test_titles
+    from collection_rewards import grant_owner_test_titles,sync_hidden_roles
+    await sync_hidden_roles(guild,store)
     await grant_owner_test_titles(guild,store,OWNER_ID,logger)
     verified_roles={r.id:r for r in await guild.fetch_roles()}
     for title in rows(store,GUILD_ID):

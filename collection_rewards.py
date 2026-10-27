@@ -70,7 +70,9 @@ async def sync_hidden_roles(guild,store,user_ids=None):
         else:user_ids=set(user_ids)
         reward_ids={x[0] for x in db.execute('SELECT reward FROM title_collections')}
     reward_rows={r['id']:r for r in rows(store,guild.id) if r['id'] in reward_ids}
+    all_titles=rows(store,guild.id)
     reward_role_ids={r['role'] for r in reward_rows.values()}
+    all_title_role_ids={r['role'] for r in all_titles}
     from titles_ui import role_safe
     for uid in user_ids:
         try:member=await guild.fetch_member(uid)
@@ -83,11 +85,14 @@ async def sync_hidden_roles(guild,store,user_ids=None):
         for role in add+remove:role_safe(guild,role)
         if remove:await member.remove_roles(*remove,reason='새 칭호 추가 또는 조건 미달로 자동 히든 회수')
         if add:await member.add_roles(*add,reason='전체 구매형 칭호와 지급 전용 칭호 보유로 자동 히든 장착')
+        from role_layout import sync_member_title_separators
+        remaining=({r.id for r in member.roles if r.id in all_title_role_ids}-set(current-wanted_roles))|wanted_roles
+        await sync_member_title_separators(guild,store,member,remaining)
 
 
 async def grant_owner_test_titles(guild,store,owner_id,logger):
     """One-time owner-only experiment; future titles are intentionally not auto-granted."""
-    if store.get('titles:owner-test-all')==1:return
+    if store.get('titles:owner-test-all')==2:return
     catalog=rows(store,guild.id)
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
@@ -101,8 +106,10 @@ async def grant_owner_test_titles(guild,store,owner_id,logger):
         role=guild.get_role(title['role']);role_safe(guild,role);roles.append(role)
     missing=[r for r in roles if r not in member.roles]
     if missing:await member.add_roles(*missing,reason='소유자 요청: 현재 모든 칭호 역할 장착 실험')
-    store.put('titles:owner-test-all',1)
-    logger.warning('소유자 칭호 실험 적용 · 현재 칭호 %s개 전부 보유/역할 부착 · 이후 추가 칭호는 자동 지급하지 않음',len(roles))
+    from role_layout import sync_member_title_separators
+    await sync_member_title_separators(guild,store,member,{r.id for r in roles})
+    store.put('titles:owner-test-all',2)
+    logger.warning('소유자 칭호 실험 적용 · 현재 칭호 %s개와 큰 칭호/세트 구분선 부착 · 이후 추가 칭호는 자동 지급하지 않음',len(roles))
 
 
 async def ensure_collections(guild,store,logger):

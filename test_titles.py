@@ -66,11 +66,31 @@ class RoleWearTests(unittest.IsolatedAsyncioTestCase):
             member=Mock();member.id=2;member.roles=[clan,other,old]
             member.remove_roles=AsyncMock();member.add_roles=AsyncMock()
             fresh=Mock();fresh.roles=[clan,other,new]
-            i=Mock();i.user.id=2;i.guild.fetch_member=AsyncMock(side_effect=[member,fresh]);i.guild.get_role.return_value=new
+            i=Mock();i.user.id=2;i.guild.id=GUILD_ID;i.guild.fetch_member=AsyncMock(side_effect=[member,fresh]);i.guild.get_role.return_value=new
             with patch('titles_ui.role_safe'):
                 await wear(i,s,b)
             member.remove_roles.assert_awaited_once_with(old,reason='보유 칭호 변경 · 장식 역할만 변경')
             member.add_roles.assert_awaited_once_with(new,reason='보유 칭호 및 자동 히든 장착')
+    async def test_profile_receives_large_title_and_series_dividers(self):
+        from role_layout import LABELS,series_label,sync_member_title_separators
+        self.assertEqual(LABELS['titles'],'～～～ ⟡ 칭호 ⟡ ～～～')
+        self.assertEqual(series_label('설월의 시'),'～～ 〈 설월의 시 〉 ～～')
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(Path(tmp)/'db');initialise_titles(s)
+            create_title(s,GUILD_ID,'a',10,'sale',100,False,9,'설월의 시')
+            create_title(s,GUILD_ID,'b',11,'grant',0,False,9,'인연의 서약')
+            s.put('roles:separator:titles',100);s.put('roles:series:설월의 시',101);s.put('roles:series:인연의 서약',102)
+            title_a,title_b=Mock(),Mock();title_a.id,title_b.id=10,11
+            dividers=[]
+            for rid in [100,101,102]:
+                role=Mock();role.id=rid;dividers.append(role)
+            member=Mock();member.roles=[title_a,title_b];member.add_roles=AsyncMock();member.remove_roles=AsyncMock()
+            guild=Mock();guild.id=GUILD_ID;guild.get_role.side_effect=lambda rid:{r.id:r for r in dividers}[rid]
+            with patch('role_layout.separator_safe'):
+                await sync_member_title_separators(guild,s,member,{10,11})
+            added=member.add_roles.call_args.args
+            self.assertEqual({r.id for r in added},{100,101,102})
+            member.remove_roles.assert_not_awaited()
     async def test_regular_member_not_allowed_admin_commands(self):
         i=Mock();i.guild_id=GUILD_ID;i.user.id=2;i.permissions.administrator=False;i.client.closing_for_backup=False
         with self.assertRaises(discord.app_commands.CheckFailure):admin(i)
