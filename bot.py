@@ -12,6 +12,7 @@ from discord import app_commands
 from core import GUILD_ID, LAYOUT, Store, PROTECTED_CHANNEL_IDS, ARCHIVE_NAME, VOICE_NAMES
 from schedule import active_seconds
 from reset_ui import show_reset
+from membership import show_gate, JoinRequestView, safe_clan_role, configure_once
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
 store = Store(DATA / 'seolon.sqlite3')
@@ -44,6 +45,7 @@ class Client(discord.Client):
         application = await self.application_info()
         if application.id != APPLICATION_ID:
             raise RuntimeError('설온지기의 토큰이 아닙니다. Application ID 1564477701199233125의 Bot 토큰을 확인하세요.')
+        self.add_view(JoinRequestView(store))
         await self.tree.sync(guild=discord.Object(id=GUILD_ID))
 
 
@@ -58,6 +60,7 @@ async def on_ready():
         log.error('설온 서버에 봇이 설치되어 있지 않거나 서버에 접근할 수 없습니다.')
         return
     log.warning('설온지기 연결 완료 · 서버: %s · 소유자 전용 명령어 준비 완료', guild.name)
+    await configure_once(guild, OWNER_ID, store, DATA, lock, require_admin, log)
 
 
 def require_admin(interaction):
@@ -223,6 +226,8 @@ class ApplyView(discord.ui.View):
 @app_commands.default_permissions(administrator=True)
 async def design(interaction: discord.Interaction):
     require_admin(interaction)
+    if store.get('entry:active'):
+        raise ValueError('입장 권한이 적용된 서버에서는 공개 채널이 다시 생기지 않도록 /디자인을 잠급니다. 현재 채널은 유지됩니다.')
     items = plan(interaction.guild)
     text = []
     for key, name, obj, parent in items:
@@ -259,7 +264,60 @@ async def attendance(interaction: discord.Interaction):
 @client.tree.command(name='초기화', description='보호 채널 4개 외 기존 채널을 삭제하고 새 디자인을 만듭니다', guild=scope)
 @app_commands.default_permissions(administrator=True)
 async def reset(interaction: discord.Interaction):
+    require_admin(interaction)
+    if store.get('entry:active'):
+        raise ValueError('입장 권한이 적용되어 /초기화를 차단했습니다. 역할·입장 설정을 해제하는 별도 작업이 먼저 필요합니다.')
     await show_reset(interaction, store, DATA, lock, require_admin, log)
+
+
+@client.tree.command(name='입장설정', description='신규 회원과 클랜원의 채널 보기 권한을 설정합니다', guild=scope)
+@app_commands.default_permissions(administrator=True)
+async def entrance(interaction: discord.Interaction):
+    await show_gate(interaction, store, DATA, lock, require_admin, log)
+
+
+async def change_clan_role(interaction, member, add):
+    require_admin(interaction)
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    role = interaction.guild.get_role(store.get('entry:clan-role') or 0)
+    if role is None:
+        raise ValueError('먼저 /입장설정을 적용하세요.')
+    if not safe_clan_role(role) or role.managed or role >= interaction.guild.me.top_role:
+        raise ValueError('클랜원 역할 권한과 순서를 확인하세요. 설온지기 역할보다 아래에 있어야 합니다.')
+    if member.bot:
+        raise ValueError('봇 계정에는 클랜원 역할을 지급하지 않습니다.')
+    member = await interaction.guild.fetch_member(member.id)
+    if add:
+        await member.add_roles(role, reason='설온 소유자 승인으로 클랜원 역할 지급')
+        store.membership_state(member.id, 'approved')
+    else:
+        await member.remove_roles(role, reason='설온 소유자 요청으로 클랜원 역할 회수')
+        store.membership_state(member.id, 'removed')
+    await interaction.followup.send(f'{member.display_name}: 클랜원 역할 {"지급" if add else "회수"} 완료. 채널 보기가 자동으로 바뀝니다.', ephemeral=True)
+
+
+@client.tree.command(name='클랜원지급', description='선택한 회원에게 클랜원 역할을 지급합니다', guild=scope)
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(대상='역할을 지급할 서버 회원')
+async def grant_clan(interaction: discord.Interaction, 대상: discord.Member):
+    await change_clan_role(interaction, 대상, True)
+
+
+@client.tree.command(name='클랜원회수', description='선택한 회원의 클랜원 역할을 회수합니다', guild=scope)
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(대상='역할을 회수할 서버 회원')
+async def remove_clan(interaction: discord.Interaction, 대상: discord.Member):
+    await change_clan_role(interaction, 대상, False)
+
+
+@client.tree.command(name='가입신청목록', description='접수된 클랜 가입 신청을 확인합니다', guild=scope)
+@app_commands.default_permissions(administrator=True)
+async def membership_requests(interaction: discord.Interaction):
+    require_admin(interaction)
+    rows = store.pending_members()
+    text = '\n'.join(f'<@{user}> · ID {user} · {date[:16]}' for user, date in rows)
+    await interaction.response.send_message('가입 신청 (먼저 접수된 25명)\n' + (text or '대기 중인 신청이 없습니다.')
+                                           + '\n/클랜원지급에서 대상을 선택하면 승인됩니다.', ephemeral=True)
 
 
 @client.tree.command(name='여권', description='내 출석과 눈꽃 잔액을 확인합니다', guild=scope)
@@ -274,7 +332,7 @@ async def passport(interaction: discord.Interaction):
 
 @client.tree.command(name='상태', description='봇의 현재 기능을 확인합니다', guild=scope)
 async def status(interaction: discord.Interaction):
-    await interaction.response.send_message('설온 봇 v0.3 · 보호 채널 4개\n사용 가능: /디자인 /초기화 /출석 /여권 /구조기록\n'
+    await interaction.response.send_message('설온 봇 v0.4 · 보호 채널 4개\n사용 가능: /디자인 /초기화 /입장설정 /클랜원지급 /클랜원회수 /가입신청목록 /출석 /여권 /구조기록\n'
                                            '아직 없음: 상점 교환, 자동 역할, 음성방, 제재, AI 대화', ephemeral=True)
 
 

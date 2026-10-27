@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -44,12 +45,37 @@ class Store:
                 PRIMARY KEY (guild,user));
             CREATE TABLE IF NOT EXISTS objects (
                 key TEXT PRIMARY KEY, id INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS membership_requests (
+                user INTEGER PRIMARY KEY, requested_at TEXT NOT NULL, state TEXT NOT NULL);
             ''')
 
+    @contextmanager
     def connect(self):
         db = sqlite3.connect(self.path, timeout=20)
-        db.execute('PRAGMA journal_mode=WAL')
-        return db
+        try:
+            db.execute('PRAGMA journal_mode=WAL')
+            with db:
+                yield db
+        finally:
+            db.close()
+
+    def request_membership(self, user):
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT state FROM membership_requests WHERE user=?', (user,)).fetchone()
+            if row and row[0] == 'pending':
+                return False
+            db.execute('INSERT OR REPLACE INTO membership_requests VALUES (?,?,?)',
+                       (user, datetime.now(ZoneInfo('Asia/Seoul')).isoformat(), 'pending'))
+            return True
+
+    def membership_state(self, user, state):
+        with self.connect() as db:
+            db.execute('UPDATE membership_requests SET state=? WHERE user=?', (state, user))
+
+    def pending_members(self):
+        with self.connect() as db:
+            return db.execute("SELECT user,requested_at FROM membership_requests WHERE state='pending' ORDER BY requested_at LIMIT 25").fetchall()
 
     def get(self, key):
         with self.connect() as db:
