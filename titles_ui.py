@@ -13,6 +13,8 @@ from titles_store import initialise_titles, rows, get_title, create_title, confi
 TITLE_LOCK=asyncio.Lock()
 OWNER_ID=1119230372174123169
 LOG=logging.getLogger('seolon')
+TITLE_NAMES={'첫눈':'설중매향','눈길':'설월청휘','설온의 시작':'설온지연'}
+TITLE_MEANINGS={'설중매향':('雪中梅香','눈 속에 피어난 매화의 향기'),'설월청휘':('雪月淸輝','눈과 달이 빚어낸 맑은 빛'),'설온지연':('雪溫之緣','설온에서 이어진 인연')}
 ADMIN_COMMANDS={'칭호생성','칭호판매설정','칭호판매중지','칭호수정','칭호지급','칭호회수'}
 
 
@@ -198,6 +200,8 @@ def detail_embed(row):
         if not row['selling']: desc+='\n판매 중지'
         if row['ends_at']: desc+=f"\n판매 종료: <t:{row['ends_at']}:f>"
         if row['stock'] is not None: desc+=f"\n남은 판매 수량: {max(0,row['stock']-row['sold'])}개"
+    meaning=TITLE_MEANINGS.get(row['name'])
+    if meaning: desc=f'{meaning[0]} · {meaning[1]}\n\n'+desc
     return discord.Embed(title=row['name'],description=desc,colour=0xB8C8D8)
 
 
@@ -234,11 +238,30 @@ async def new_role_title(guild,store,name,kind,price,hidden,actor,series='기타
     return tid,role
 
 
+async def refresh_default_title_names(guild,store,logger):
+    if store.get('titles:literary-names')==1:return
+    roles={r.id:r for r in await guild.fetch_roles()}
+    for old,new in TITLE_NAMES.items():
+        title=next((r for r in rows(store,GUILD_ID) if r['name']==old),None)
+        if title is None:continue
+        if any(r['name']==new for r in rows(store,GUILD_ID)):
+            raise ValueError('새 기본 칭호 이름이 중복되어 이름 변경을 중단합니다.')
+        role=roles.get(title['role'])
+        role_safe(guild,role)
+        await role.edit(name='⟡ '+new,reason='소유자 요청: 기존 칭호를 네 글자 한자어 스타일로 변경')
+        with store.connect() as db:
+            db.execute('UPDATE titles SET name=? WHERE id=? AND guild=?',(new,title['id'],GUILD_ID))
+        record(store,'기본 칭호 이름 변경',OWNER_ID,role.id,{'이전':old,'이름':new})
+        logger.warning('칭호 이름 변경 완료: %s → %s · 역할 ID %s · 가격/보유/세트 유지',old,new,role.id)
+    store.put('titles:literary-names',1)
+
+
 async def setup_titles(guild,store,logger):
     initialise_titles(store)
     async with TITLE_LOCK:
+        await refresh_default_title_names(guild,store,logger)
         if not store.get('titles:seeded'):
-            for name,kind,price,series in [('첫눈','sale',650,'겨울'),('눈길','sale',1200,'겨울'),('설온의 시작','grant',0,'기념')]:
+            for name,kind,price,series in [('설중매향','sale',650,'겨울'),('설월청휘','sale',1200,'겨울'),('설온지연','grant',0,'기념')]:
                 if any(r['name']==name for r in rows(store,GUILD_ID)): continue
                 await new_role_title(guild,store,name,kind,price,False,OWNER_ID,series)
             store.put('titles:seeded',1)
