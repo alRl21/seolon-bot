@@ -16,6 +16,7 @@ from membership import show_gate, JoinRequestView, safe_clan_role, configure_onc
 from arrange import arrange_categories
 from channel_policy import setup_channel_policy
 from attendance_ui import AttendanceView, setup_attendance
+from music_setup import setup_music_channel, setup_tts_permissions
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
 store = Store(DATA / 'seolon.sqlite3')
@@ -69,11 +70,24 @@ async def on_ready():
         async with lock:
             await correct_clan_role(guild, OWNER_ID, store, log)
             await setup_admin_chat(guild, OWNER_ID, store, log)
+            await setup_music_channel(guild, OWNER_ID, store, log)
+            await setup_tts_permissions(guild, store, log)
             await arrange_categories(guild, store, client.http, log)
             await setup_channel_policy(guild, OWNER_ID, store, log)
             await setup_attendance(guild, OWNER_ID, store, log)
     except Exception:
         log.exception('서버 기본 설정 적용을 완료하지 못했습니다.')
+
+
+@client.event
+async def on_guild_role_create(role):
+    if role.guild.id != GUILD_ID or getattr(role.tags, 'bot_id', None) != 1019061779357245521:
+        return
+    try:
+        async with lock:
+            await setup_tts_permissions(role.guild, store, log)
+    except Exception:
+        log.exception('카미봇 초대 후 접근권한 적용 실패')
 
 
 def require_admin(interaction):

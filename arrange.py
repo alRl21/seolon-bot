@@ -3,7 +3,7 @@ import discord
 from core import LAYOUT
 from membership import ADMIN_PROTECTED_IDS, OPS_CATEGORY
 
-ORDER_REQUEST = 2026102702
+ORDER_REQUEST = 2026102703
 
 
 def category_order(channels, store):
@@ -27,6 +27,7 @@ def category_order(channels, store):
         raise ValueError('관리자 전용 보호 채널이 입장 공간에 있습니다. 보호 채널은 이동하지 않고 정렬을 중단합니다.')
     block_ids = [entry_id]
     block_ids += [store.get('category:' + name) for name, _, _ in LAYOUT]
+    block_ids += [store.get('utility:category')]
     block_ids += [c.id for c in categories if c.name == OPS_CATEGORY]
     block = []
     seen = set()

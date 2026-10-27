@@ -18,7 +18,8 @@ CLAN_ROLE = '클랜원'
 CLAN_ROLE_ID = 1522946198984593541
 OPS_CATEGORY = '── ⟡ 설온 운영실 ⟡ ──'
 ENTRY_LOG_CHANNEL_ID = 1523611752837681192
-ADMIN_PROTECTED_IDS = PROTECTED_CHANNEL_IDS - {ENTRY_LOG_CHANNEL_ID}
+MUSIC_CHANNEL_ID = 1522946795217490141
+ADMIN_PROTECTED_IDS = PROTECTED_CHANNEL_IDS - {ENTRY_LOG_CHANNEL_ID, MUSIC_CHANNEL_ID}
 CONFIG_REQUEST = 2026102703
 ADMIN_CHAT_CHANNEL_ID = 1523604140108939285
 ADMIN_CATEGORY = '── ⟡ 관리자 전용 ⟡ ──'
@@ -163,6 +164,8 @@ def protected_channel(c):
 def entry_mode(c, guild, store):
     if c.id == ENTRY_LOG_CHANNEL_ID:
         return 'entry'
+    if c.id == MUSIC_CHANNEL_ID:
+        return 'main'
     if protected_channel(c):
         return 'admin'
     if c.id in {store.get('entry:category'), store.get('entry:log'), store.get('entry:role')}:

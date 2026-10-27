@@ -49,7 +49,7 @@ class VisibilityTests(unittest.TestCase):
             channel.category_id = None
             channel.category = None
             channel.name = 'preserved'
-            self.assertEqual(entry_mode(channel, guild, store), 'entry' if cid == ENTRY_LOG_CHANNEL_ID else 'admin')
+            self.assertEqual(entry_mode(channel, guild, store), 'entry' if cid == ENTRY_LOG_CHANNEL_ID else ('main' if cid == 1522946795217490141 else 'admin'))
 
     def test_private_operations_space_never_opened_to_clan(self):
         guild = Mock()
@@ -173,7 +173,7 @@ class GateExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('입장 설정 완료', interaction.followup.send.call_args.args[0])
         for pin in pins:
             self.assertEqual(pin.overwrites_for(everyone).view_channel, pin.id == ENTRY_LOG_CHANNEL_ID)
-            self.assertFalse(pin.overwrites_for(clan).view_channel)
+            self.assertEqual(pin.overwrites_for(clan).view_channel, pin.id == 1522946795217490141)
         self.assertFalse(main.overwrites_for(everyone).view_channel)
         self.assertTrue(main.overwrites_for(clan).view_channel)
         self.assertEqual(store.get('entry:active'), 1)
@@ -184,7 +184,7 @@ class GateExecutionTests(unittest.IsolatedAsyncioTestCase):
         for pin in pins:
             self.assertEqual(set(pin.edit.call_args.kwargs), {'overwrites', 'reason'})
             self.assertEqual(pin.overwrites_for(everyone).view_channel, pin.id == ENTRY_LOG_CHANNEL_ID)
-            self.assertFalse(pin.overwrites_for(clan).view_channel)
+            self.assertEqual(pin.overwrites_for(clan).view_channel, pin.id == 1522946795217490141)
             if pin.id == ENTRY_LOG_CHANNEL_ID:
                 self.assertEqual(pin.name, '﹒입장로그')
                 self.assertIsNotNone(pin.category_id)
