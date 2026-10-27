@@ -9,7 +9,7 @@ from pathlib import Path
 import discord
 from discord import app_commands
 
-from core import GUILD_ID, LAYOUT, Store
+from core import GUILD_ID, LAYOUT, Store, PROTECTED_CHANNEL_IDS, ARCHIVE_NAME, VOICE_NAMES
 from schedule import active_seconds
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
@@ -72,30 +72,73 @@ def unique(items, names):
     return hits[0] if hits else None
 
 
+def protected(obj):
+    return obj.id in PROTECTED_CHANNEL_IDS or getattr(obj, 'category_id', None) in PROTECTED_CHANNEL_IDS
+
+
+def protected_category(cat, guild):
+    return protected(cat) or any(protected(c) and getattr(c, 'category_id', None) == cat.id for c in guild.channels)
+
+
 def plan(guild):
     result = []
+    used = set()
     for name, aliases, channels in LAYOUT:
         key = 'category:' + name
+        categories = [c for c in guild.categories if not protected_category(c, guild)]
         saved = guild.get_channel(store.get(key) or 0)
-        cat = saved or unique(guild.categories, [name] + aliases)
-        if cat and not isinstance(cat, discord.CategoryChannel):
-            raise ValueError('기록된 카테고리 종류가 다릅니다.')
+        cat = saved if saved in categories else unique(categories, [name] + aliases)
         result.append((key, name, cat, None))
-        # Reuse channels only inside the selected category; do not relocate unrelated channels.
+        if cat:
+            used.add(cat.id)
         for cname, calias in channels:
-            ckey = 'text:' + cname
-            obj = guild.get_channel(store.get(ckey) or 0)
-            if not obj:
-                obj = unique(cat.text_channels if cat else [], [cname] + calias)
-            if obj and (not isinstance(obj, discord.TextChannel) or not cat or obj.category_id != cat.id):
-                raise ValueError(f'{cname}: 기존 위치가 바뀌어 적용을 멈췄습니다.')
+            kind = discord.VoiceChannel if cname in VOICE_NAMES else discord.TextChannel
+            ckey = ('voice:' if cname in VOICE_NAMES else 'text:') + cname
+            candidates = [c for c in guild.channels if isinstance(c, kind) and not protected(c) and c.id not in used]
+            saved = guild.get_channel(store.get(ckey) or 0)
+            obj = saved if saved in candidates else None
+            if obj is None:
+                # Exact current names win; aliases are only used if unique.
+                obj = unique(candidates, [cname]) or unique(candidates, calias)
+            if obj:
+                used.add(obj.id)
             result.append((ckey, cname, obj, key))
+    # Surplus public channels are kept with their messages and permission overwrites.
+    # Private channels and all explicitly protected channels stay in place.
+    extras = [c for c in guild.channels if isinstance(c, (discord.TextChannel, discord.VoiceChannel))
+              and c.id not in used and not protected(c)
+              and c.permissions_for(guild.default_role).view_channel]
+    if extras:
+        akey = 'category:' + ARCHIVE_NAME
+        archive = unique([c for c in guild.categories if not protected_category(c, guild)], [ARCHIVE_NAME])
+        result.append((akey, ARCHIVE_NAME, archive, None))
+        for c in extras:
+            result.append(('archive:' + str(c.id), c.name, c, akey))
     return result
+
+
+def overwrite_fingerprint(obj):
+    return sorted((target.id, *[p.value for p in permissions.pair()])
+                  for target, permissions in obj.overwrites.items())
 
 
 def fingerprint(items):
     return [(k, n, o.id if o else None, o.name if o else None,
-             getattr(o, 'category_id', None)) for k, n, o, parent in items]
+             getattr(o, 'category_id', None), overwrite_fingerprint(o) if o else [])
+            for k, n, o, parent in items]
+
+
+async def update_existing(obj, name, parent=None):
+    if protected(obj):
+        raise ValueError(f'보호 채널 {obj.id} 변경을 차단했습니다.')
+    changes = {}
+    if obj.name != name:
+        changes['name'] = name
+    if parent is not None and obj.category_id != parent.id:
+        changes.update(category=parent, sync_permissions=False, overwrites=dict(obj.overwrites))
+    if changes:
+        return await obj.edit(**changes, reason='설온 특수기호 디자인 적용')
+    return obj
 
 
 class ApplyView(discord.ui.View):
@@ -136,25 +179,28 @@ class ApplyView(discord.ui.View):
                 for key, name, obj, parent in current:
                     if parent is None:
                         if obj:
-                            if obj.name != name:
-                                await obj.edit(name=name, reason='설온 디자인 적용')
+                            if protected_category(obj, guild):
+                                raise ValueError('보호 채널이 들어 있는 카테고리는 변경하지 않습니다.')
+                            obj = await update_existing(obj, name)
                         else:
-                            obj = await guild.create_category(name, reason='설온 디자인 적용')
+                            obj = await guild.create_category(name, reason='설온 특수기호 디자인 적용')
                         parents[key] = obj
                     else:
                         if obj:
-                            if obj.name != name:
-                                # Name only: never synchronize or replace existing overwrites.
-                                await obj.edit(name=name, reason='설온 디자인 적용')
+                            obj = await update_existing(obj, name, parents[parent])
+                        elif key.startswith('voice:'):
+                            obj = await guild.create_voice_channel(name, category=parents[parent], reason='설온 특수기호 디자인 적용')
                         else:
-                            obj = await guild.create_text_channel(name, category=parents[parent],
-                                                                  reason='설온 디자인 적용')
-                    store.put(key, obj.id)
+                            obj = await guild.create_text_channel(name, category=parents[parent], reason='설온 특수기호 디자인 적용')
+                    if not key.startswith('archive:'):
+                        store.put(key, obj.id)
                     completed += 1
                 await interaction.followup.send(
-                    f'디자인 적용 완료 · {completed}개 항목 확인\n기존 메시지·권한·채널을 삭제하지 않았습니다.\n'
-                    '음성방과 운영진 비공개 공간은 기존 구성을 유지했습니다.\n'
-                    '출석: /출석 · 내 기록: /여권\n상점·AI·자동 음성방·제재 기능은 아직 연결되지 않았습니다.',
+                    f'설온 디자인 v0.2 적용 완료 · {completed}개 항목 확인\n'
+                    '지정한 보호 채널 4개는 이름·소속 카테고리·권한을 변경하지 않습니다.\n'
+                    '남는 공개 채널은 이전 기록으로 보관하고, 비공개 채널은 기존 위치에 유지합니다.\n'
+                    '메시지와 채널은 삭제하지 않습니다. 빈 기존 카테고리도 삭제하지 않았습니다.\n'
+                    '＋ 새로운 방은 음성방 자리만 준비됩니다. 자동 생성 기능은 아직 없습니다.',
                     ephemeral=True)
             except Exception as exc:
                 log.exception('Design apply failed')
@@ -180,10 +226,22 @@ async def design(interaction: discord.Interaction):
     text = []
     for key, name, obj, parent in items:
         action = '생성' if not obj else ('유지' if obj.name == name else f'이름 변경: {obj.name}')
+        if key.startswith('archive:'):
+            action = '이전 기록에 보관' if not obj.category or obj.category.name != ARCHIVE_NAME else '보관 유지'
+        elif obj and parent and obj.category_id != next((o.id for k, n, o, p in items if k == parent and o), None):
+            action += ' · 카테고리 이동'
         text.append(f'{"  " if parent else ""}{name} · {action}')
-    embed = discord.Embed(title='설온 · 디자인 미리보기', description='\n'.join(text), color=0xA7C7E7)
-    embed.set_footer(text='관리자 전용 · 삭제 없음 · 중복이 발견되면 중단 · 버튼은 3분간 유효')
-    await interaction.response.send_message(embed=embed, view=ApplyView(interaction.user.id, fingerprint(items)), ephemeral=True)
+    text.append('\n고정 보호 채널 (이름·소속 카테고리·권한 유지)')
+    for cid in sorted(PROTECTED_CHANNEL_IDS):
+        obj = interaction.guild.get_channel(cid)
+        text.append(f'{cid} · {obj.name if obj else "현재 서버 목록에서 확인되지 않음 · 보호 설정은 유지"}')
+    full_text = '\n'.join(text)
+    embed = discord.Embed(title='설온 · 특수기호 디자인 v0.2', description=full_text[:3800], color=0xB8C8D8)
+    embed.set_footer(text='소유자 전용 · 4개 채널 보호 · 삭제 없음 · 상세 변경 목록은 첨부 파일')
+    attachment = discord.File(io.BytesIO(full_text.encode('utf-8')), filename='seolon-design-preview.txt')
+    await interaction.response.send_message(embed=embed, file=attachment,
+                                           view=ApplyView(interaction.user.id, fingerprint(items)), ephemeral=True)
+
 
 
 @client.tree.command(name='출석', description='하루 한 번 출석하고 눈꽃을 받습니다', guild=scope)
@@ -209,7 +267,7 @@ async def passport(interaction: discord.Interaction):
 
 @client.tree.command(name='상태', description='봇의 현재 기능을 확인합니다', guild=scope)
 async def status(interaction: discord.Interaction):
-    await interaction.response.send_message('설온 봇 v0.1\n사용 가능: /디자인 /출석 /여권 /구조기록\n'
+    await interaction.response.send_message('설온 봇 v0.2 · 보호 채널 4개\n사용 가능: /디자인 /출석 /여권 /구조기록\n'
                                            '아직 없음: 상점 교환, 자동 역할, 음성방, 제재, AI 대화', ephemeral=True)
 
 
