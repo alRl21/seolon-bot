@@ -15,6 +15,7 @@ from reset_ui import show_reset
 from membership import show_gate, JoinRequestView, safe_clan_role, configure_once, setup_admin_chat, correct_clan_role
 from arrange import arrange_categories
 from channel_policy import setup_channel_policy
+from attendance_ui import AttendanceView, setup_attendance
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
 store = Store(DATA / 'seolon.sqlite3')
@@ -48,6 +49,7 @@ class Client(discord.Client):
         if application.id != APPLICATION_ID:
             raise RuntimeError('설온지기의 토큰이 아닙니다. Application ID 1564477701199233125의 Bot 토큰을 확인하세요.')
         self.add_view(JoinRequestView(store))
+        self.add_view(AttendanceView(store))
         await self.tree.sync(guild=discord.Object(id=GUILD_ID))
 
 
@@ -69,6 +71,7 @@ async def on_ready():
             await setup_admin_chat(guild, OWNER_ID, store, log)
             await arrange_categories(guild, store, client.http, log)
             await setup_channel_policy(guild, OWNER_ID, store, log)
+            await setup_attendance(guild, OWNER_ID, store, log)
     except Exception:
         log.exception('서버 기본 설정 적용을 완료하지 못했습니다.')
 
@@ -260,14 +263,14 @@ async def design(interaction: discord.Interaction):
 
 
 
-@client.tree.command(name='출석', description='하루 한 번 출석하고 눈꽃을 받습니다', guild=scope)
+@client.tree.command(name='출석', description='하루 한 번 출석하고 눈송이를 받습니다', guild=scope)
 async def attendance(interaction: discord.Interaction):
     result = store.attend(interaction.guild_id, interaction.user.id)
     if result is None:
-        text = '오늘은 이미 출석했어요. 한국 시간 자정 이후 다시 만나요.'
+        text = '오늘은 이미 출석했어요. 내일 오전 7시 이후 다시 만나요.'
     else:
         reward, streak = result
-        text = f'❄ 출석 완료! 눈꽃 +{reward}\n연속 출석 {streak}일'
+        text = f'⟡ 출석 완료! 눈송이 +{reward}\n연속 출석 {streak}일'
     await interaction.response.send_message(text, ephemeral=True)
 
 
@@ -340,13 +343,13 @@ async def arrange(interaction: discord.Interaction):
     await interaction.followup.send('보호 구역 바로 아래에 입장 공간과 설온 본 채널을 순서대로 배치했습니다.', ephemeral=True)
 
 
-@client.tree.command(name='여권', description='내 출석과 눈꽃 잔액을 확인합니다', guild=scope)
+@client.tree.command(name='여권', description='내 출석과 눈송이 잔액을 확인합니다', guild=scope)
 async def passport(interaction: discord.Interaction):
     balance, days = store.profile(interaction.guild_id, interaction.user.id)
-    embed = discord.Embed(title='❄ 설온 여권', color=0xA7C7E7)
+    embed = discord.Embed(title='⟡ 설온 여권', color=0xA7C7E7)
     embed.add_field(name='이름', value=interaction.user.display_name)
     embed.add_field(name='누적 출석', value=f'{days}일')
-    embed.add_field(name='보유 눈꽃', value=f'{balance:,}')
+    embed.add_field(name='보유 눈송이', value=f'{balance:,}')
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 

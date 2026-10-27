@@ -129,3 +129,18 @@ class Store:
             row = db.execute('SELECT balance FROM wallet WHERE guild=? AND user=?', (guild, user)).fetchone()
             days = db.execute('SELECT count(*) FROM attendance WHERE guild=? AND user=?', (guild, user)).fetchone()[0]
             return (row[0] if row else 0), days
+
+
+    def attendance_status(self, guild, user, day=None):
+        day = day or datetime.now(ZoneInfo('Asia/Seoul')).date()
+        with self.connect() as db:
+            def attended(d):
+                return db.execute('SELECT 1 FROM attendance WHERE guild=? AND user=? AND day=?',
+                                  (guild, user, d.isoformat())).fetchone() is not None
+            today = attended(day)
+            cursor = day if today else day - timedelta(days=1)
+            streak = 0
+            while attended(cursor):
+                streak += 1
+                cursor -= timedelta(days=1)
+            return streak, today
