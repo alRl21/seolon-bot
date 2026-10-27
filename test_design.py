@@ -89,7 +89,7 @@ class DesignTests(unittest.TestCase):
         channel = self.channel(55, name='📢┃공지사항')
         guild.channels = [channel]
         plan = bot.plan(guild)
-        self.assertIs(next(o for k, n, o, p in plan if n == '﹒공지사항'), channel)
+        self.assertIs(next(o for k, n, o, p in plan if n == '┊공지사항'), channel)
 
     def test_preview_detects_changed_permissions(self):
         channel = self.channel(55)

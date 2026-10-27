@@ -14,22 +14,22 @@ PROTECTED_CHANNEL_IDS = frozenset({
     1522946795217490141,
 })
 ARCHIVE_NAME = '── ⟡ 이전 기록 ⟡ ──'
-VOICE_NAMES = frozenset({'﹒라운지', '﹒게임방', '＋ 새로운 방', '﹒자리비움'})
+VOICE_NAMES = frozenset({'┊라운지', '┊게임방', '＋ 새로운 방', '┊자리비움'})
 LAYOUT = [
     ('── ⟡ 처음의 설온 ⟡ ──', ['❄ ─── 처음 오셨나요 ───', '📌 시작 및 안내', '01  ──  INFORMATION'], [
-        ('﹒시작하기', ['👋┃시작하기', '시작하기', 'welcome']), ('﹒공지사항', ['📢┃공지사항', '공지사항', 'announcements']),
-        ('﹒이용규칙', ['📖┃이용규칙', '서버규칙', '이용규칙', 'guidelines']), ('﹒역할선택', ['🎭┃역할선택', '역할선택'])]),
+        ('┊시작하기', ['﹒시작하기', '👋┃시작하기', '시작하기', 'welcome']), ('┊공지사항', ['﹒공지사항', '📢┃공지사항', '공지사항', 'announcements']),
+        ('┊이용규칙', ['﹒이용규칙', '📖┃이용규칙', '서버규칙', '이용규칙', 'guidelines']), ('┊역할선택', ['﹒역할선택', '🎭┃역할선택', '역할선택'])]),
     ('── ⟡ 머무는 공간 ⟡ ──', ['☁ ─── 설온 라운지 ───', '💬 커뮤니티', '02  ──  SOCIAL'], [
-        ('﹒도란도란', ['💬┃도란도란', '자유채팅', 'lounge']), ('﹒사진과기록', ['📷┃사진과기록', '사진·일상', 'media']),
-        ('﹒취향공유', ['🎵┃취향공유', '게임추천'])]),
+        ('┊도란도란', ['﹒도란도란', '💬┃도란도란', '자유채팅', 'lounge']), ('┊사진과기록', ['﹒사진과기록', '📷┃사진과기록', '사진·일상', 'media']),
+        ('┊취향공유', ['﹒취향공유', '🎵┃취향공유', '게임추천'])]),
     ('── ⟡ 함께하는 순간 ⟡ ──', ['✦ ─── 함께하는 시간 ───', '🎮 게임 및 파티', '03  ──  GAMING'], [
-        ('﹒파티모집', ['🎮┃파티모집', '파티모집', 'party-finder']), ('﹒게임이야기', ['🕹️┃게임이야기', '게임정보', 'game-chat']),
-        ('﹒이벤트', ['🎉┃이벤트', '이벤트공지'])]),
+        ('┊파티모집', ['﹒파티모집', '🎮┃파티모집', '파티모집', 'party-finder']), ('┊게임이야기', ['﹒게임이야기', '🕹️┃게임이야기', '게임정보', 'game-chat']),
+        ('┊이벤트', ['﹒이벤트', '🎉┃이벤트', '이벤트공지'])]),
     ('── ⟡ 쌓이는 발자국 ⟡ ──', ['✧ ─── 눈꽃 기록실 ───'], [
-        ('﹒출석체크', ['📅┃출석체크', '출석체크']), ('﹒눈꽃상점', ['🛍️┃눈꽃상점']), ('﹒봇명령어', ['🤖┃봇명령어'])]),
+        ('┊출석체크', ['﹒출석체크', '📅┃출석체크', '출석체크']), ('┊눈꽃상점', ['﹒눈꽃상점', '🛍️┃눈꽃상점']), ('┊봇명령어', ['﹒봇명령어', '🤖┃봇명령어'])]),
     ('── ⟡ 목소리의 온도 ⟡ ──', ['🔊 음성 라운지', '♫ ─── 목소리가 모이는 곳 ───'], [
-        ('﹒라운지', ['☕┃도란도란', '자유 음성채팅', '자유 통화방']), ('﹒게임방', ['🎮┃같이해요', '게임 파티 1']),
-        ('＋ 새로운 방', ['➕┃우리방만들기', '＋ 통화방 만들기']), ('﹒자리비움', ['💤┃자리비움', '잠수방'])]),
+        ('┊라운지', ['﹒라운지', '☕┃도란도란', '자유 음성채팅', '자유 통화방']), ('┊게임방', ['﹒게임방', '🎮┃같이해요', '게임 파티 1']),
+        ('＋ 새로운 방', ['➕┃우리방만들기', '＋ 통화방 만들기']), ('┊자리비움', ['﹒자리비움', '💤┃자리비움', '잠수방'])]),
 ]
 
 
@@ -54,6 +54,12 @@ class Store:
             columns = {row[1] for row in db.execute('PRAGMA table_info(membership_requests)')}
             if 'last_notice_at' not in columns:
                 db.execute('ALTER TABLE membership_requests ADD COLUMN last_notice_at INTEGER NOT NULL DEFAULT 0')
+            # `﹒` is rendered as blank space in Discord's mobile channel list.
+            # Preserve every channel ID while moving stored object keys to the
+            # visibly wider, cross-platform `┊` prefix.
+            for key, value in db.execute("SELECT key,id FROM objects WHERE instr(key,'﹒')>0").fetchall():
+                db.execute('INSERT OR REPLACE INTO objects(key,id) VALUES (?,?)', (key.replace('﹒','┊'), value))
+                db.execute('DELETE FROM objects WHERE key=?', (key,))
         initialise(self)
 
     @contextmanager

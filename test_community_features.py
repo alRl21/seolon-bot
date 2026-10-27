@@ -10,7 +10,7 @@ from core import Store,GUILD_ID,PROTECTED_CHANNEL_IDS
 from titles_store import initialise_titles,create_title,grant,purchase,rows,revoke
 from collection_rewards import claim_completed
 from community_store import initialise_community,create_party,join_party,party_members,create_poll,vote,counts,close_item
-from items_store import initialise_items,item_rows,buy_item,redeem_voucher,use_theme
+from items_store import initialise_items,item_rows,buy_item,redeem_voucher,use_theme,grant_voucher
 from voice_rooms import cleanup_room,voice_update
 
 class CommunityDatabaseTests(unittest.TestCase):
@@ -65,21 +65,26 @@ class CommunityDatabaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):create_party(self.s,1,'롤',300,2,'',now=101)
         with self.assertRaises(ValueError):create_party(self.s,2,'롤',300,21,'',now=101)
         with self.assertRaises(ValueError):create_poll(self.s,2,'x',['같음','같음'],1,now=100)
-    def test_item_purchase_voucher_redeem_and_no_duplicate_consumption(self):
-        voucher=next(r for r in item_rows(self.s) if r['kind']=='voucher')
+    def test_admin_granted_voucher_redeems_without_charging_and_no_duplicate_consumption(self):
+        self.assertFalse(any(r['kind']=='voucher' for r in item_rows(self.s)))
+        with self.s.connect() as db:voucher_id=db.execute("SELECT id FROM shop_items WHERE kind='voucher'").fetchone()[0]
+        with self.assertRaises(ValueError):buy_item(self.s,1,2,voucher_id)
+        grant_voucher(self.s,9,2,1)
+        voucher=next(r for r in item_rows(self.s,2) if r['kind']=='voucher')
         title=create_title(self.s,1,'교환 대상',50,'sale',650,False,9)
-        buy_item(self.s,1,2,voucher['id']);redeem_voucher(self.s,1,2,voucher['id'],title)
-        self.assertEqual(self.s.profile(1,2)[0],9350)
+        redeem_voucher(self.s,1,2,voucher['id'],title)
+        self.assertEqual(self.s.profile(1,2)[0],10000)
         self.assertEqual(len(rows(self.s,1,2)),1)
         with self.assertRaises(ValueError):redeem_voucher(self.s,1,2,voucher['id'],title)
         self.assertEqual(item_rows(self.s,2),[])
-    def test_voucher_never_redeems_grant_hidden_or_limited(self):
-        voucher=next(r for r in item_rows(self.s) if r['kind']=='voucher')
-        buy_item(self.s,1,2,voucher['id'])
+    def test_voucher_redeems_grant_hidden_and_limited_titles(self):
+        grant_voucher(self.s,9,2,3)
+        voucher=next(r for r in item_rows(self.s,2) if r['kind']=='voucher')
         for n,kind,hidden in [(0,'grant',False),(1,'sale',True),(2,'limited',False)]:
             title=create_title(self.s,1,str(n),50+n,kind,100,hidden,9)
-            with self.assertRaises(ValueError):redeem_voucher(self.s,1,2,voucher['id'],title)
-        self.assertEqual(item_rows(self.s,2)[0]['quantity'],1)
+            redeem_voucher(self.s,1,2,voucher['id'],title)
+        self.assertEqual(item_rows(self.s,2),[])
+        self.assertEqual(len(rows(self.s,1,2)),3)
     def test_permanent_theme_no_double_charge_and_applies(self):
         theme=next(r for r in item_rows(self.s) if r['kind']=='theme')
         buy_item(self.s,1,2,theme['id']);use_theme(self.s,2,theme['id'])

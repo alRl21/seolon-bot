@@ -12,8 +12,8 @@ from core import GUILD_ID, LAYOUT, PROTECTED_CHANNEL_IDS
 from rebuild import inventory_signature, keep_ids
 
 ENTRY_CATEGORY = '── ⟡ 설온의 문 앞 ⟡ ──'
-ENTRY_LOG = '﹒입장로그'
-ENTRY_ROLE = '﹒역할받기'
+ENTRY_LOG = '┊입장로그'
+ENTRY_ROLE = '┊역할받기'
 CLAN_ROLE = '클랜원'
 CLAN_ROLE_ID = 1522946198984593541
 OPS_CATEGORY = '── ⟡ 설온 운영실 ⟡ ──'
@@ -23,7 +23,7 @@ ADMIN_PROTECTED_IDS = PROTECTED_CHANNEL_IDS - {ENTRY_LOG_CHANNEL_ID, MUSIC_CHANN
 CONFIG_REQUEST = 2026102703
 ADMIN_CHAT_CHANNEL_ID = 1523604140108939285
 ADMIN_CATEGORY = '── ⟡ 관리자 전용 ⟡ ──'
-ADMIN_CHAT_NAME = '﹒관리자채팅'
+ADMIN_CHAT_NAME = '┊관리자채팅'
 ADMIN_CHAT_REQUEST = 2026102701
 
 
@@ -420,7 +420,7 @@ async def show_gate(interaction, store, data, lock, require_admin, logger):
               '디스코드의 관리자 권한은 채널 숨김을 우회합니다. 일반 계정 기준으로 확인하세요.',
               '입장 로그는 서버 기본 입장 알림을 사용하므로 봇이 꺼진 새벽에도 기록됩니다.']
     embed = discord.Embed(title='설온 · 입장과 역할 설정', colour=0xB8C8D8,
-        description='신규 회원: ﹒입장로그 / ﹒역할받기\n클랜원: 본 채널 표시 + 입장 공간 숨김\n\n'
+        description='신규 회원: ┊입장로그 / ┊역할받기\n클랜원: 본 채널 표시 + 입장 공간 숨김\n\n'
         f'기존 입장 로그 `{ENTRY_LOG_CHANNEL_ID}`는 메시지를 보존해 입장 공간에 재사용합니다.\n'
         '나머지 보호 채널 **3개는 서버 관리자만** 볼 수 있게 설정합니다.\n'
         '첨부한 항목별 계획을 확인하세요. 관리자 계정은 채널 숨김의 예외입니다.')

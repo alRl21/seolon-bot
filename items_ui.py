@@ -36,7 +36,7 @@ class ItemPicker(StoreMenu):
         select=discord.ui.Select(placeholder='사용할 아이템' if bag else '구매할 아이템',options=[discord.SelectOption(label=r['name'],value=str(r['id']),description=f"보유 {r['quantity']}개" if bag else f"{r['price']:,}눈송이") for r in choices[:25]])
         async def pick(i):
             row=next(r for r in item_rows(store) if r['id']==int(select.values[0]))
-            desc=(f"{row['price']:,}눈송이\n"+('금액 650눈송이 이하의 상시 판매 칭호 1개와 교환합니다. 차액은 돌려주지 않으며 한정/히든/지급 전용은 교환 불가.' if row['kind']=='voucher' else '프로필 카드 색을 변경하는 영구 보유 테마예요.'))
+            desc=('관리자가 지급하는 특별 아이템이에요. 보유하지 않은 칭호라면 종류·가격·판매 상태와 관계없이 하나를 선택해 교환할 수 있어요.' if row['kind']=='voucher' else f"{row['price']:,}눈송이\n프로필 카드 색을 변경하는 영구 보유 테마예요.")
             await render(i,embed=discord.Embed(title=row['name'],description=desc,colour=row['value'] if row['kind']=='theme' else 0xB8C8D8),view=ItemAction(store,user,row,bag))
         select.callback=pick;self.add_item(select);add_back(self,store,user)
 
@@ -57,7 +57,7 @@ class ItemAction(StoreMenu):
             if bag and row['kind']=='voucher':
                 from titles_store import rows
                 owned={r['id'] for r in rows(store,GUILD_ID,user)}
-                choices=[r for r in rows(store,GUILD_ID) if r['kind']=='sale' and not r['hidden'] and r['selling'] and r['ends_at'] is None and r['stock'] is None and 0<r['price']<=row['value'] and r['id'] not in owned]
+                choices=[r for r in rows(store,GUILD_ID) if r['id'] not in owned]
                 if not choices:
                     await render(i,content='교환 가능한 미보유 칭호가 없어요. 교환권은 사용하지 않았어요.',view=StoreMenu(store,user));return
                 await render(i,content='교환할 칭호를 선택하세요. 선택하면 교환권 1장이 사용됩니다.',view=VoucherPicker(store,user,row['id'],choices));return

@@ -171,7 +171,7 @@ class PartyModal(discord.ui.Modal,title='파티 모집'):
             async with LOCK:
                 available(i)
                 pid=create_party(self.store,i.user.id,game,starts,capacity,self.description.value)
-                channel=i.guild.get_channel(self.store.get('text:﹒파티모집') or 0)
+                channel=i.guild.get_channel(self.store.get('text:┊파티모집') or 0)
                 if not isinstance(channel,discord.TextChannel):raise ValueError('파티 모집 채널을 찾을 수 없습니다.')
                 with self.store.connect() as db:
                     db.row_factory=__import__('sqlite3').Row
@@ -298,11 +298,11 @@ async def setup_community(guild,store,logger):
         if not isinstance(category,discord.CategoryChannel):raise ValueError('모임 카테고리를 찾을 수 없습니다.')
         permissions=view_overwrites({},guild.default_role,clan,owner,guild.me,'main')
         permissions=readonly_overwrites(permissions,guild.default_role,clan,owner,guild.me)
-        poll_channel=await guild.create_text_channel('﹒일정',category=category,overwrites=permissions,reason='소유자 요청: 일정 투표 채널')
+        poll_channel=await guild.create_text_channel('┊일정',category=category,overwrites=permissions,reason='소유자 요청: 일정 투표 채널')
         store.put('community:poll-channel',poll_channel.id);store.put('entry:gated:'+str(poll_channel.id),poll_channel.id)
-    panels=[('community:hub','text:﹒봇명령어','커뮤니티 메뉴','내 프로필·도감·게임 역할·음성방을 한 화면에서 관리하세요.',Hub(store)),
-            ('community:games','text:﹒역할선택','게임 역할','관심 게임을 선택하면 해당 게임 모집 알림을 받을 수 있어요.',Hub(store)),
-            ('community:party-panel','text:﹒파티모집','파티 모집','게임·시간·인원을 정하고 버튼으로 참여하세요. 게임 알림은 최초 모집 때 한 번만 전송돼요.',PartyPanel(store))]
+    panels=[('community:hub','text:┊봇명령어','커뮤니티 메뉴','내 프로필·도감·게임 역할·음성방을 한 화면에서 관리하세요.',Hub(store)),
+            ('community:games','text:┊역할선택','게임 역할','관심 게임을 선택하면 해당 게임 모집 알림을 받을 수 있어요.',Hub(store)),
+            ('community:party-panel','text:┊파티모집','파티 모집','게임·시간·인원을 정하고 버튼으로 참여하세요. 게임 알림은 최초 모집 때 한 번만 전송돼요.',PartyPanel(store))]
     for key,channel_key,title,desc,view in panels:
         if store.get(key):continue
         channel=guild.get_channel(store.get(channel_key) or 0)

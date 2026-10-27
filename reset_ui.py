@@ -62,7 +62,7 @@ class ResetView(discord.ui.View):
                     for cname, _ in channels:
                         voice = cname in VOICE_NAMES
                         kwargs = {'category': category, 'reason': '설온 초기화: 새 채널 준비'}
-                        if cname in {'﹒시작하기', '﹒공지사항', '﹒이용규칙', '﹒이벤트'}:
+                        if cname in {'┊시작하기', '┊공지사항', '┊이용규칙', '┊이벤트'}:
                             kwargs['overwrites'] = {
                                 guild.default_role: discord.PermissionOverwrite(send_messages=False),
                                 guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True)}
@@ -76,16 +76,16 @@ class ResetView(discord.ui.View):
                     interaction.user: discord.PermissionOverwrite(view_channel=True),
                     guild.me: discord.PermissionOverwrite(view_channel=True)}, reason='설온 초기화: 소유자 전용 운영실')
                 made += 1
-                for name in ['﹒운영회의', '﹒관리기록']:
+                for name in ['┊운영회의', '┊관리기록']:
                     fresh[name] = await guild.create_text_channel(name, category=ops, reason='설온 초기화: 운영 공간 준비')
                     made += 1
                 # Community servers cannot delete the active rules/updates channel.
                 # Repoint only settings that refer to explicitly confirmed deletion targets.
                 deleting = {c.id for c in targets}
                 updates = {}
-                for attr, destination in [('rules_channel', '﹒이용규칙'), ('public_updates_channel', '﹒관리기록'),
-                                          ('system_channel', '﹒시작하기'), ('afk_channel', '﹒자리비움'),
-                                          ('safety_alerts_channel', '﹒관리기록')]:
+                for attr, destination in [('rules_channel', '┊이용규칙'), ('public_updates_channel', '┊관리기록'),
+                                          ('system_channel', '┊시작하기'), ('afk_channel', '┊자리비움'),
+                                          ('safety_alerts_channel', '┊관리기록')]:
                     current = getattr(guild, attr, None)
                     if current is not None and current.id in deleting:
                         updates[attr] = fresh[destination]
@@ -150,7 +150,7 @@ async def show_reset(interaction, store, data, lock, require_admin, logger):
     for name, _, entries in LAYOUT:
         rows.append(name)
         rows.extend('  ' + n for n, _ in entries)
-    rows.extend(['── ⟡ 설온 운영실 ⟡ ──', '  ﹒운영회의', '  ﹒관리기록', '',
+    rows.extend(['── ⟡ 설온 운영실 ⟡ ──', '  ┊운영회의', '  ┊관리기록', '',
                  '기존 회원·역할·출석·눈꽃 잔액은 삭제하지 않습니다.',
                  '커뮤니티 규칙·업데이트 등 서버 채널 연결 설정은 삭제 대상인 경우 새 채널로 이전합니다.'])
     file = discord.File(io.BytesIO('\n'.join(rows).encode('utf-8')), filename='seolon-reset-targets.txt')

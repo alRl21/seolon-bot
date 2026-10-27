@@ -23,7 +23,8 @@ from titles_ui import ShopPanel, setup_titles, register_commands, ADMIN_COMMANDS
 from titles_store import initialise_titles
 from emoji_setup import setup_emoji_permissions, NQN_ID
 from community_store import initialise_community
-from items_store import initialise_items
+from items_store import initialise_items, grant_voucher
+from channel_names import setup_mobile_channel_names
 from community_ui import Hub,PartyPanel,PartyView,PollPanel,PollView,CommunityWorker,setup_community,LOCK as COMMUNITY_LOCK
 from voice_rooms import voice_update,cleanup_empty_rooms,VOICE_LOCK
 
@@ -103,6 +104,7 @@ async def on_ready():
     await configure_once(guild, OWNER_ID, store, DATA, lock, require_admin, log)
     try:
         async with lock:
+            await setup_mobile_channel_names(guild, store, log)
             await correct_clan_role(guild, OWNER_ID, store, log)
             await setup_admin_chat(guild, OWNER_ID, store, log)
             await setup_music_channel(guild, OWNER_ID, store, log)
@@ -167,6 +169,21 @@ async def manual_backup(interaction: discord.Interaction):
     async with lock:
         await operations.backup(interaction.guild, force=True)
     await interaction.followup.send('데이터 백업과 무결성 확인 완료. 관리자 전용 백업 채널에 저장했어요.', ephemeral=True)
+
+
+@client.tree.command(name='교환권지급', description='회원에게 모든 칭호 중 하나를 고를 수 있는 교환권을 지급합니다', guild=scope)
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(대상='교환권을 받을 서버 회원', 수량='지급할 수량 (1~99)')
+async def give_voucher(interaction: discord.Interaction, 대상: discord.Member,
+                       수량: app_commands.Range[int,1,99] = 1):
+    if interaction.guild_id != GUILD_ID or not (interaction.user.id == OWNER_ID or interaction.permissions.administrator):
+        raise app_commands.CheckFailure('서버 관리자만 교환권을 지급할 수 있습니다.')
+    if 대상.bot:
+        raise ValueError('봇 계정에는 교환권을 지급하지 않습니다.')
+    async with TITLE_LOCK:
+        total = grant_voucher(store, interaction.user.id, 대상.id, 수량)
+    await interaction.response.send_message(
+        f'{대상.display_name}에게 칭호 교환권 {수량}장을 지급했어요. 현재 보유 {total}장입니다.', ephemeral=True)
 
 
 def require_admin(interaction):

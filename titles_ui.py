@@ -31,7 +31,7 @@ def tier_colour(series,tier):
     if not 1<=tier<=4:raise ValueError('단계는 1~4입니다.')
     return PALETTES.get(series,DEFAULT_PALETTE)[tier-1]
 
-ADMIN_COMMANDS={'칭호생성','칭호판매설정','칭호판매중지','칭호수정','칭호지급','칭호회수'}
+ADMIN_COMMANDS={'칭호생성','칭호판매설정','칭호판매중지','칭호수정','칭호지급','칭호회수','교환권지급'}
 
 
 def admin(i):
@@ -370,19 +370,19 @@ async def setup_titles(guild,store,logger):
             store.put('titles:seeded',1)
         await setup_title_progression(guild,store,logger)
         if not store.get('titles:panel'):
-            cid=store.get('text:﹒눈꽃상점')
+            cid=store.get('text:┊눈꽃상점')
             channels=await guild.fetch_channels()
             channel=next((c for c in channels if c.id==cid and isinstance(c,discord.TextChannel)),None)
             if channel is None or channel.id in PROTECTED_CHANNEL_IDS: raise ValueError('칭호 상점 채널을 확인할 수 없습니다.')
             embed=discord.Embed(title='칭호 상점',colour=0xB8C8D8,description='눈송이로 칭호를 모아 보세요.\n여러 칭호를 보유하고, 한 번에 하나만 착용할 수 있어요.\n상시 판매 · 기간/수량 한정 판매 · 관리자 지급 전용\n판매가 끝나도 이미 얻은 칭호는 계속 사용할 수 있어요.\n상점과 보유 칭호는 아래 버튼으로 확인하세요.')
             m=await channel.send(embed=embed,view=ShopPanel(store))
             store.put('titles:panel',m.id)
-    if store.get('titles:panel-version')!=2:
-        channel=guild.get_channel(store.get('text:﹒눈꽃상점') or 0)
+    if store.get('titles:panel-version')!=3:
+        channel=guild.get_channel(store.get('text:┊눈꽃상점') or 0)
         message=await channel.fetch_message(store.get('titles:panel'))
-        embed=discord.Embed(title='상점',colour=0xB8C8D8,description='눈송이로 칭호와 아이템을 구매하세요.\n상점 → 칭호 / 아이템 · 구매한 물건은 내 가방에서 사용\n칭호 도감의 4개를 완성하면 구매할 수 없는 히든 칭호를 획득해요.\n히든 칭호도 내 칭호에서 착용할 수 있어요.')
+        embed=discord.Embed(title='상점',colour=0xB8C8D8,description='눈송이로 칭호와 아이템을 구매하세요.\n상점 → 칭호 / 아이템 · 구매한 물건은 내 가방에서 사용\n칭호 교환권은 상점에서 판매하지 않는 관리자 지급 전용 특별권이에요.\n교환권으로는 보유하지 않은 모든 칭호 중 하나를 선택할 수 있어요.\n칭호 도감의 4개를 완성하면 히든 칭호도 획득해요.')
         await message.edit(embed=embed,view=ShopPanel(store))
-        store.put('titles:panel-version',2)
+        store.put('titles:panel-version',3)
     from collection_rewards import ensure_collections
     await ensure_collections(guild,store,logger)
     await organise_roles(guild,store,logger)

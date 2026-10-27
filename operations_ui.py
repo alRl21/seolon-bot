@@ -201,15 +201,15 @@ async def setup_operations(guild, store, logger):
     admin_category = guild.get_channel(store.get('admin:category') or 0)
     if not isinstance(admin_category, discord.CategoryChannel):
         raise ValueError('관리자 카테고리를 찾을 수 없습니다.')
-    audit = await ensure('support:log', '﹒운영기록', admin_category, private)
-    backup = await ensure('support:backup', '﹒백업', admin_category, private)
+    audit = await ensure('support:log', '┊운영기록', admin_category, private)
+    backup = await ensure('support:backup', '┊백업', admin_category, private)
     utility = guild.get_channel(store.get('utility:category') or 0)
     if not isinstance(utility, discord.CategoryChannel):
         raise ValueError('봇 카테고리를 찾을 수 없습니다.')
     clan = guild.get_role(CLAN_ROLE_ID)
     panel_permissions = {**private, clan: discord.PermissionOverwrite(view_channel=True, read_message_history=True)}
     panel_permissions = readonly_overwrites(panel_permissions, guild.default_role, clan, owner, guild.me)
-    panel = await ensure('support:panel-channel', '﹒문의', utility, panel_permissions)
+    panel = await ensure('support:panel-channel', '┊문의', utility, panel_permissions)
     if store.get('support:panel-version') != 2:
         embed = discord.Embed(title='문의', colour=0xB8C8D8,
             description='운영진에게 문의하거나 문제를 신고할 수 있어요.\n버튼을 누르면 본인과 관리자만 보는 채널이 열려요.\n진행 중인 문의는 한 개, 새 문의는 10분 간격으로 만들 수 있어요.\n종료 시 대화·첨부파일을 관리자 기록에 보관하고 문의 채널은 삭제해요.')

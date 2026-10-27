@@ -62,8 +62,8 @@ async def setup_attendance(guild, owner_id, store, logger):
     if store.get('attendance:panel-version') == 2:
         return
     channels = await guild.fetch_channels()
-    cid = store.get('text:﹒출석체크')
-    choices = [c for c in channels if isinstance(c, discord.TextChannel) and (c.id == cid if cid else c.name == '﹒출석체크')]
+    cid = store.get('text:┊출석체크')
+    choices = [c for c in channels if isinstance(c, discord.TextChannel) and (c.id == cid if cid else c.name == '┊출석체크')]
     if len(choices) != 1:
         raise ValueError('출석체크 채널을 하나로 확인할 수 없습니다.')
     channel = choices[0]

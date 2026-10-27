@@ -186,7 +186,7 @@ class GateExecutionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(pin.overwrites_for(everyone).view_channel, pin.id == ENTRY_LOG_CHANNEL_ID)
             self.assertEqual(pin.overwrites_for(clan).view_channel, pin.id == 1522946795217490141)
             if pin.id == ENTRY_LOG_CHANNEL_ID:
-                self.assertEqual(pin.name, '﹒입장로그')
+                self.assertEqual(pin.name, '┊입장로그')
                 self.assertIsNotNone(pin.category_id)
             else:
                 self.assertEqual(pin.name, 'protected')

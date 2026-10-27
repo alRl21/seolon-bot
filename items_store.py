@@ -8,15 +8,29 @@ def initialise_items(store):
         CREATE TABLE IF NOT EXISTS item_bag(user INTEGER,item INTEGER,quantity INTEGER,PRIMARY KEY(user,item));
         CREATE TABLE IF NOT EXISTS profile_styles(user INTEGER PRIMARY KEY,colour INTEGER);
         ''')
-        for name,kind,value,price in [('칭호 교환권','voucher',650,650),('프로필 · 자정','theme',0x334D80,300),('프로필 · 여명','theme',0x9F72B8,300)]:
+        for name,kind,value,price in [('칭호 교환권','voucher',0,0),('프로필 · 자정','theme',0x334D80,300),('프로필 · 여명','theme',0x9F72B8,300)]:
             db.execute('INSERT OR IGNORE INTO shop_items(name,kind,value,price) VALUES (?,?,?,?)',(name,kind,value,price))
+        db.execute("UPDATE shop_items SET enabled=0,value=0,price=0 WHERE name='칭호 교환권' AND kind='voucher'")
 
 
 def item_rows(store,user=None):
     with store.connect() as db:
         db.row_factory=__import__('sqlite3').Row
         query='SELECT i.*,coalesce(b.quantity,0) quantity FROM shop_items i LEFT JOIN item_bag b ON b.item=i.id AND b.user=?'
-        return [dict(r) for r in db.execute(query,(user or 0,)) if user is None or r['quantity']>0]
+        return [dict(r) for r in db.execute(query,(user or 0,)) if (r['enabled'] if user is None else r['quantity']>0)]
+
+
+def grant_voucher(store,actor,user,quantity):
+    if not 1 <= quantity <= 99:raise ValueError('지급 수량은 1~99장입니다.')
+    with store.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        row=db.execute("SELECT id FROM shop_items WHERE name='칭호 교환권' AND kind='voucher'").fetchone()
+        if row is None:raise ValueError('칭호 교환권 아이템을 찾을 수 없습니다.')
+        current=db.execute('SELECT quantity FROM item_bag WHERE user=? AND item=?',(user,row[0])).fetchone()
+        if (current[0] if current else 0)+quantity>99:raise ValueError('대상 회원의 교환권은 최대 99장까지 보유할 수 있어요.')
+        db.execute('INSERT INTO item_bag VALUES (?,?,?) ON CONFLICT(user,item) DO UPDATE SET quantity=quantity+excluded.quantity',(user,row[0],quantity))
+        event(db,'관리자 칭호 교환권 지급',actor,user,{'수량':quantity})
+        return (current[0] if current else 0)+quantity
 
 
 def buy_item(store,guild,user,item):
@@ -47,13 +61,12 @@ def redeem_voucher(store,guild,user,item,title):
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         voucher=db.execute('SELECT i.kind,i.value,b.quantity FROM shop_items i JOIN item_bag b ON b.item=i.id AND b.user=? WHERE i.id=?',(user,item)).fetchone()
-        target=db.execute('SELECT kind,price,hidden,selling,ends_at,stock,name FROM titles WHERE guild=? AND id=?',(guild,title)).fetchone()
+        target=db.execute('SELECT name FROM titles WHERE guild=? AND id=?',(guild,title)).fetchone()
         if voucher is None or voucher[0]!='voucher' or voucher[2]<1:raise ValueError('교환권이 없어요.')
-        if (target is None or target[0]!='sale' or target[2] or not target[3] or target[4] is not None or target[5] is not None or not 0<target[1]<=voucher[1]):
-            raise ValueError('교환권 금액 이내의 상시 판매 칭호만 교환할 수 있어요. 한정·지급 전용·히든은 제외합니다.')
+        if target is None:raise ValueError('등록된 칭호가 아닙니다.')
         if db.execute('SELECT 1 FROM title_owned WHERE guild=? AND user=? AND title=?',(guild,user,title)).fetchone():raise ValueError('이미 가진 칭호예요. 교환권은 사용하지 않았어요.')
         db.execute('UPDATE item_bag SET quantity=quantity-1 WHERE user=? AND item=?',(user,item))
         db.execute('INSERT INTO title_owned VALUES (?,?,?,?)',(guild,user,title,'voucher'))
         db.execute('UPDATE titles SET sold=sold+1 WHERE id=?',(title,))
-        event(db,'칭호 교환권 사용',user,user,{'아이템':item,'칭호':target[6]})
+        event(db,'칭호 교환권 사용',user,user,{'아이템':item,'칭호':target[0]})
         award_completed(db,guild,user)

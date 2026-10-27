@@ -3,7 +3,7 @@ from core import PROTECTED_CHANNEL_IDS
 from membership import CLAN_ROLE_ID
 
 NQN_ID=559426966151757824
-CHAT_NAMES=('﹒도란도란','﹒사진과기록','﹒취향공유','﹒파티모집','﹒게임이야기','﹒봇명령어')
+CHAT_NAMES=('┊도란도란','┊사진과기록','┊취향공유','┊파티모집','┊게임이야기','┊봇명령어')
 BOT_PERMISSIONS=('view_channel','send_messages','read_message_history','manage_messages',
                  'embed_links','attach_files','external_emojis','manage_webhooks','send_messages_in_threads')
 

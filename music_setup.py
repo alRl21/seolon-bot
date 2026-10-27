@@ -36,10 +36,10 @@ async def setup_music_channel(guild, owner_id, store, logger):
             value.embed_links = value.attach_files = True
     tts = next((c for c in channels if c.id == store.get('utility:tts')), None)
     if tts is None:
-        matches = [c for c in channels if isinstance(c, discord.TextChannel) and c.category_id == category.id and c.name == '﹒tts']
+        matches = [c for c in channels if isinstance(c, discord.TextChannel) and c.category_id == category.id and c.name == '┊tts']
         if len(matches) > 1:
             raise ValueError('TTS 채널이 중복되어 있습니다.')
-        tts = matches[0] if matches else await guild.create_text_channel('﹒tts', category=category,
+        tts = matches[0] if matches else await guild.create_text_channel('┊tts', category=category,
             overwrites=view_overwrites({}, guild.default_role, clan, owner, guild.me, 'main'),
             topic='음성방에서 마이크 대신 전달할 말을 적는 TTS 전용 채널',
             reason='소유자 요청: 사용하기 쉬운 TTS 공간 준비')
@@ -49,15 +49,15 @@ async def setup_music_channel(guild, owner_id, store, logger):
         value = tts_permissions[target]
         value.send_messages = value.read_message_history = value.use_application_commands = True
     await tts.edit(overwrites=tts_permissions)
-    command_channel = next((c for c in channels if isinstance(c, discord.TextChannel) and c.id == store.get('text:﹒봇명령어')), None)
+    command_channel = next((c for c in channels if isinstance(c, discord.TextChannel) and c.id == store.get('text:┊봇명령어')), None)
     if command_channel:
-        await command_channel.edit(name='﹒명령어', category=category, sync_permissions=False,
+        await command_channel.edit(name='┊명령어', category=category, sync_permissions=False,
                                    reason='소유자 요청: 봇 명령 채널도 유틸리티 공간으로 정리')
     old_name = channel.name
-    await channel.edit(name='﹒음악', category=category, sync_permissions=False, overwrites=overwrites,
+    await channel.edit(name='┊음악', category=category, sync_permissions=False, overwrites=overwrites,
                        reason='소유자 요청: 기존 하리보 음악 채널을 봇·유틸리티 카테고리로 이동하고 클랜원 사용 허용')
     fresh = next(c for c in await guild.fetch_channels() if c.id == MUSIC_CHANNEL_ID)
-    if (fresh.category_id != category.id or fresh.name != '﹒음악' or
+    if (fresh.category_id != category.id or fresh.name != '┊음악' or
             fresh.overwrites_for(clan).view_channel is not True or
             fresh.overwrites_for(clan).send_messages is not True or
             fresh.overwrites_for(guild.default_role).view_channel is not False):

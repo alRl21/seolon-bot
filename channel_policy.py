@@ -1,8 +1,8 @@
 import discord
 from core import PROTECTED_CHANNEL_IDS
 
-READONLY_NAMES = frozenset({'﹒시작하기', '﹒공지사항', '﹒이용규칙', '﹒역할선택',
-                            '﹒역할받기', '﹒입장로그', '﹒이벤트', '﹒눈꽃상점'})
+READONLY_NAMES = frozenset({'┊시작하기', '┊공지사항', '┊이용규칙', '┊역할선택',
+                            '┊역할받기', '┊입장로그', '┊이벤트', '┊눈꽃상점'})
 WRITE_PERMISSIONS = ('send_messages', 'send_messages_in_threads', 'create_public_threads',
                      'create_private_threads', 'send_voice_messages', 'send_polls')
 POLICY_VERSION = 2026102701
