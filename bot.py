@@ -21,6 +21,7 @@ from operations_ui import TicketPanel, CloseTicketView, OperationsWorker, setup_
 from operations_store import record
 from titles_ui import ShopPanel, setup_titles, register_commands, ADMIN_COMMANDS, TITLE_LOCK
 from titles_store import initialise_titles
+from emoji_setup import setup_emoji_permissions, NQN_ID
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
 store = Store(DATA / 'seolon.sqlite3')
@@ -100,17 +101,21 @@ async def on_ready():
             await setup_titles(guild, store, log)
             if not operations.run.is_running():
                 operations.run.start()
+            await setup_emoji_permissions(guild, store, log)
     except Exception:
         log.exception('서버 기본 설정 적용을 완료하지 못했습니다.')
 
 
 @client.event
 async def on_guild_role_create(role):
-    if role.guild.id != GUILD_ID or getattr(role.tags, 'bot_id', None) != 1019061779357245521:
+    if role.guild.id != GUILD_ID or getattr(role.tags, 'bot_id', None) not in {1019061779357245521, NQN_ID}:
         return
     try:
         async with lock:
-            await setup_tts_permissions(role.guild, store, log)
+            if getattr(role.tags, 'bot_id', None) == NQN_ID:
+                await setup_emoji_permissions(role.guild, store, log)
+            else:
+                await setup_tts_permissions(role.guild, store, log)
     except Exception:
         log.exception('카미봇 초대 후 접근권한 적용 실패')
 
