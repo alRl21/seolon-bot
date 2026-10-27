@@ -19,9 +19,12 @@ from attendance_ui import AttendanceView, setup_attendance
 from music_setup import setup_music_channel, setup_tts_permissions
 from operations_ui import TicketPanel, CloseTicketView, OperationsWorker, setup_operations, TICKET_LOCK
 from operations_store import record
+from titles_ui import ShopPanel, setup_titles, register_commands, ADMIN_COMMANDS, TITLE_LOCK
+from titles_store import initialise_titles
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
 store = Store(DATA / 'seolon.sqlite3')
+initialise_titles(store)
 log = logging.getLogger('seolon')
 lock = asyncio.Lock()
 OWNER_ID = 1119230372174123169
@@ -36,7 +39,12 @@ def require_owner(interaction):
 
 class OwnerTree(app_commands.CommandTree):
     async def interaction_check(self, interaction):
-        require_owner(interaction)
+        command = getattr(interaction.command, 'name', '')
+        if command in ADMIN_COMMANDS:
+            if interaction.guild_id != GUILD_ID or not (interaction.user.id == OWNER_ID or interaction.permissions.administrator):
+                raise app_commands.CheckFailure('칭호 관리는 서버 관리자만 사용할 수 있습니다.')
+        else:
+            require_owner(interaction)
         if getattr(interaction.client, 'closing_for_backup', False) is True:
             raise app_commands.CheckFailure('종료 전 백업 중입니다. 내일 오전 7시 이후 이용하세요.')
         return True
@@ -61,12 +69,14 @@ class Client(discord.Client):
         self.add_view(AttendanceView(store))
         self.add_view(TicketPanel(store))
         self.add_view(CloseTicketView(store))
+        self.add_view(ShopPanel(store))
         await self.tree.sync(guild=discord.Object(id=GUILD_ID))
 
 
 client = Client()
 scope = discord.Object(id=GUILD_ID)
 operations = OperationsWorker(client, store, DATA)
+register_commands(client.tree, store, scope)
 
 
 @client.event
@@ -87,6 +97,7 @@ async def on_ready():
             await setup_channel_policy(guild, OWNER_ID, store, log)
             await setup_attendance(guild, OWNER_ID, store, log)
             await setup_operations(guild, store, log)
+            await setup_titles(guild, store, log)
             if not operations.run.is_running():
                 operations.run.start()
     except Exception:
@@ -448,9 +459,10 @@ async def run_scheduled(token):
             async def final_backup():
                 async with lock:
                     async with TICKET_LOCK:
-                        if guild is None:
-                            raise RuntimeError('서버에 연결되지 않아 종료 전 백업을 전송할 수 없습니다.')
-                        await operations.backup(guild)
+                        async with TITLE_LOCK:
+                            if guild is None:
+                                raise RuntimeError('서버에 연결되지 않아 종료 전 백업을 전송할 수 없습니다.')
+                            await operations.backup(guild)
             try:
                 await asyncio.wait_for(final_backup(), timeout=max(0.1, active_seconds()))
             except Exception:
