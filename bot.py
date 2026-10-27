@@ -10,6 +10,7 @@ import discord
 from discord import app_commands
 
 from core import GUILD_ID, LAYOUT, Store
+from schedule import active_seconds
 
 DATA = Path(os.environ.get('DATA_DIR', 'data'))
 store = Store(DATA / 'seolon.sqlite3')
@@ -233,10 +234,23 @@ async def command_error(interaction: discord.Interaction, error: app_commands.Ap
         await interaction.response.send_message(message, ephemeral=True)
 
 
+async def run_scheduled(token):
+    seconds = active_seconds()
+    if seconds <= 0:
+        log.warning('한국 시간 00:00~07:00 휴식 시간입니다. 프로세스를 종료합니다.')
+        return
+    async with client:
+        try:
+            await asyncio.wait_for(client.start(token), timeout=seconds)
+        except asyncio.TimeoutError:
+            log.warning('한국 시간 자정입니다. 연결을 닫고 프로세스를 종료합니다.')
+
+
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
     if OWNER_ID <= 0:
         raise SystemExit('OWNER_ID 환경변수에 본인의 Discord 사용자 ID를 설정하세요. 설정 전에는 누구도 명령어를 실행할 수 없습니다.')
     token = os.environ.get('DISCORD_TOKEN', '').strip()
     if not token:
         raise SystemExit('DISCORD_TOKEN 환경변수에 봇 토큰을 설정하세요. 채팅에 보내지 마세요.')
-    client.run(token)
+    asyncio.run(run_scheduled(token))
