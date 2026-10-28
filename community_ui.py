@@ -19,6 +19,12 @@ from items_store import initialise_items
 
 LOCK=asyncio.Lock()
 GAMES=('발로란트','롤','워프레임','배그','오버워치','메이플스토리')
+PROFILE_TAGS={
+    'primary':('대표 게임',GAMES,1),
+    'style':('플레이 성향',('경쟁','협동','성장','수집','가볍게'),2),
+    'time':('활동 시간',('낮','저녁','심야'),1),
+}
+PROFILE_ROLE_PREFIX={'primary':'대표 게임','style':'플레이','time':'활동'}
 OWNER_ID=1119230372174123169
 LOG=logging.getLogger('seolon')
 KST=ZoneInfo('Asia/Seoul')
@@ -47,8 +53,8 @@ class Hub(MemberView):
     async def profile(self,i,b):await show_profile(i,self.store)
     @discord.ui.button(label='칭호 도감',custom_id='seolon:hub:codex:v1')
     async def codex(self,i,b):await show_codex(i,self.store)
-    @discord.ui.button(label='게임 역할',custom_id='seolon:hub:games:v1')
-    async def games(self,i,b):await show_games(i,self.store)
+    @discord.ui.button(label='프로필 태그',custom_id='seolon:hub:games:v1')
+    async def games(self,i,b):await show_profile_tags(i,self.store)
     @discord.ui.button(label='내 음성방',custom_id='seolon:hub:voice:v1')
     async def voice(self,i,b):
         from voice_rooms import RoomMenu
@@ -67,6 +73,7 @@ async def show_profile(i,store):
         colour=db.execute('SELECT colour FROM profile_styles WHERE user=?',(i.user.id,)).fetchone()
         worn=db.execute('SELECT t.name FROM titles t JOIN title_equipped e ON e.title=t.id WHERE e.guild=? AND e.user=?',(GUILD_ID,i.user.id)).fetchone()
         completed=db.execute('SELECT count(*) FROM collection_claims WHERE guild=? AND user=?',(GUILD_ID,i.user.id)).fetchone()[0]
+        profile_rows=db.execute('SELECT kind,name,role FROM profile_roles ORDER BY kind,position').fetchall()
     from collection_rewards import automatic_hidden_ids
     hidden_ids=automatic_hidden_ids(store,GUILD_ID,i.user.id)
     hidden_names=[r['name'] for r in rows(store,GUILD_ID,i.user.id) if r['id'] in hidden_ids]
@@ -78,6 +85,11 @@ async def show_profile(i,store):
     shown=([worn[0]] if worn else [])+hidden_names
     embed.add_field(name='착용 칭호',value=' · '.join(dict.fromkeys(shown)) if shown else '없음')
     embed.add_field(name='보유 칭호',value=f'{len(rows(store,GUILD_ID,i.user.id))}개 · 자동 히든 {completed}개')
+    member_role_ids={r.id for r in member.roles}
+    selected={kind:[name for k,name,rid in profile_rows if k==kind and rid in member_role_ids] for kind in PROFILE_TAGS}
+    embed.add_field(name='대표 게임',value=' · '.join(selected['primary']) or '선택 안 함')
+    embed.add_field(name='플레이 성향',value=' · '.join(selected['style']) or '선택 안 함')
+    embed.add_field(name='활동 시간',value=' · '.join(selected['time']) or '선택 안 함')
     embed.add_field(name='서버 가입',value=f'<t:{int(member.joined_at.timestamp())}:D>' if member.joined_at else '확인할 수 없음')
     await render(i,embed=embed,view=Hub(store,i.user.id))
 
@@ -99,7 +111,7 @@ async def show_codex(i,store,series=None):
     embed=discord.Embed(title=name+' · 칭호 도감',description='\n'.join(lines),colour=0xC59A3C)
     embed.add_field(name='현재 세트',value=f'{len(set(ids)&owned)}/{len(ids)}')
     embed.add_field(name='전체 구매형',value=f"{len(state['purchasable']&owned)}/{len(state['purchasable'])}")
-    embed.add_field(name='한정 · 구매 불가',value='조건 충족' if state['grant_only']&owned else '최소 1개 필요')
+    embed.add_field(name='특별 수여',value='조건 충족' if state['grant_only']&owned else '최소 1개 필요')
     reward_text=' · '.join(reward_names) if state['eligible'] else '???'
     embed.add_field(name='통합 히든',value=(reward_text+' · 자동 장착 중') if state['eligible'] else '구매 가능한 칭호 전체와 한정 칭호 1개 이상을 모으면 자동 장착돼요.',inline=False)
     if earned:embed.set_footer(text='히든 칭호를 획득해 자동 장착했어요.')
@@ -110,36 +122,75 @@ async def show_codex(i,store,series=None):
     await render(i,embed=embed,view=view)
 
 
-async def show_games(i,store):
+def tag_summary(member,profile_rows,games):
+    current={r.id for r in member.roles}
+    grouped={kind:[name for k,name,rid,_ in profile_rows if k==kind and rid in current] for kind in PROFILE_TAGS}
+    alerts=[name for name,rid in games if rid in current]
+    embed=discord.Embed(title='프로필 태그',description='내 역할을 직접 고를 수 있어요. 채널 권한에는 영향을 주지 않습니다.',colour=0x91AFC8)
+    embed.add_field(name='대표 게임',value=' · '.join(grouped['primary']) or '선택 안 함')
+    embed.add_field(name='플레이 성향',value=' · '.join(grouped['style']) or '선택 안 함')
+    embed.add_field(name='활동 시간',value=' · '.join(grouped['time']) or '선택 안 함')
+    embed.add_field(name='모집 알림',value=' · '.join(alerts) or '받지 않음',inline=False)
+    embed.set_footer(text='대표 게임 1개 · 플레이 성향 최대 2개 · 활동 시간 1개 · 모집 알림은 여러 개 선택 가능')
+    return embed
+
+
+class ProfileTagsView(MemberView):
+    def __init__(self,store,user,member,profile_rows,games):
+        super().__init__(store,user)
+        current={r.id for r in member.roles}
+        for row,(kind,(label,_,limit)) in enumerate(PROFILE_TAGS.items()):
+            choices=[(name,rid) for k,name,rid,_ in profile_rows if k==kind]
+            select=discord.ui.Select(placeholder=label+' 선택 · 선택을 모두 지우면 해제',min_values=0,max_values=limit,row=row,
+                options=[discord.SelectOption(label=name,value=str(rid),default=rid in current) for name,rid in choices])
+            async def choose(i,kind=kind,select=select):
+                await update_profile_roles(i,store,kind,{int(v) for v in select.values})
+            select.callback=choose;self.add_item(select)
+        select=discord.ui.Select(placeholder='파티 모집 알림 선택 · 여러 개 가능',min_values=0,max_values=len(games),row=3,
+            options=[discord.SelectOption(label=name,value=str(rid),default=rid in current) for name,rid in games])
+        async def alerts(i):await update_profile_roles(i,store,'alerts',{int(v) for v in select.values})
+        select.callback=alerts;self.add_item(select)
+        back=discord.ui.Button(label='메뉴',row=4)
+        async def home(i):await render(i,content='커뮤니티 메뉴',view=Hub(store,user))
+        back.callback=home;self.add_item(back)
+
+
+async def update_profile_roles(i,store,kind,wanted):
+    await i.response.defer()
+    async with LOCK:
+        available(i)
+        who=await i.guild.fetch_member(i.user.id)
+        with store.connect() as db:
+            if kind=='alerts':registered=dict((rid,name) for name,rid in db.execute('SELECT name,role FROM game_roles ORDER BY rowid'))
+            else:registered=dict((rid,name) for name,rid in db.execute('SELECT name,role FROM profile_roles WHERE kind=? ORDER BY position',(kind,)))
+        ids=set(registered)
+        limit=len(ids) if kind=='alerts' else PROFILE_TAGS[kind][2]
+        if not wanted<=ids or len(wanted)>limit:raise ValueError('선택 가능한 역할 수를 확인해 주세요.')
+        roles={rid:i.guild.get_role(rid) for rid in ids}
+        for role in roles.values():role_safe(i.guild,role)
+        current={r.id for r in who.roles if r.id in ids};changed=[]
+        try:
+            for rid in current-wanted:
+                await who.remove_roles(roles[rid],reason='회원이 프로필 태그 또는 모집 알림 해제');changed.append((rid,False))
+            for rid in wanted-current:
+                await who.add_roles(roles[rid],reason='회원이 프로필 태그 또는 모집 알림 선택');changed.append((rid,True))
+        except Exception:
+            for rid,added in reversed(changed):
+                try:
+                    if added:await who.remove_roles(roles[rid],reason='프로필 태그 변경 실패 복구')
+                    else:await who.add_roles(roles[rid],reason='프로필 태그 변경 실패 복구')
+                except discord.HTTPException:LOG.exception('프로필 태그 복구 실패')
+            raise
+    await show_profile_tags(i,store,'선택한 태그를 저장했어요.')
+
+
+async def show_profile_tags(i,store,content='원하는 태그를 선택해 주세요.'):
     member=await i.guild.fetch_member(i.user.id)
-    with store.connect() as db:games=db.execute('SELECT name,role FROM game_roles ORDER BY rowid').fetchall()
-    view=Hub(store,i.user.id)
-    select=discord.ui.Select(placeholder='모집 알림을 받을 게임 선택 · 다시 선택하면 변경',min_values=0,max_values=len(games),
-        options=[discord.SelectOption(label=name,value=str(rid),default=any(r.id==rid for r in member.roles)) for name,rid in games])
-    async def choose(j):
-        await j.response.defer()
-        async with LOCK:
-            available(j)
-            who=await j.guild.fetch_member(j.user.id)
-            ids={rid for _,rid in games};wanted={int(v) for v in select.values}
-            if not wanted<=ids:raise ValueError('잘못된 게임 역할입니다.')
-            current={r.id for r in who.roles if r.id in ids}
-            registered={rid:j.guild.get_role(rid) for rid in ids}
-            for role in registered.values():role_safe(j.guild,role)
-            changed=[]
-            try:
-                for rid in current-wanted:await who.remove_roles(registered[rid],reason='회원이 게임 알림 구독 해제');changed.append((rid,False))
-                for rid in wanted-current:await who.add_roles(registered[rid],reason='회원이 게임 알림 구독');changed.append((rid,True))
-            except Exception:
-                for rid,added in reversed(changed):
-                    try:
-                        if added:await who.remove_roles(registered[rid],reason='게임 역할 변경 실패 복구')
-                        else:await who.add_roles(registered[rid],reason='게임 역할 변경 실패 복구')
-                    except discord.HTTPException:LOG.exception('게임 역할 복구 실패')
-                raise
-        await render(j,content='게임 역할을 저장했어요. 선택한 게임의 모집 알림을 받을 수 있어요.',view=Hub(store,j.user.id))
-    select.callback=choose;view.add_item(select)
-    await render(i,content='원하는 게임을 골라 주세요. 게임 역할은 채널 접근 권한을 바꾸지 않아요.',view=view)
+    with store.connect() as db:
+        profile_rows=db.execute('SELECT kind,name,role,position FROM profile_roles ORDER BY kind,position').fetchall()
+        games=db.execute('SELECT name,role FROM game_roles ORDER BY rowid').fetchall()
+    await render(i,content=content,embed=tag_summary(member,profile_rows,games),
+                 view=ProfileTagsView(store,i.user.id,member,profile_rows,games))
 
 
 def party_embed(store,row):
@@ -291,16 +342,38 @@ async def setup_community(guild,store,logger):
     for name in GAMES:
         with store.connect() as db:row=db.execute('SELECT role FROM game_roles WHERE name=?',(name,)).fetchone()
         if row:
-            role_safe(guild,guild.get_role(row[0]));continue
+            role=guild.get_role(row[0]);role_safe(guild,role)
+            wanted='모집 알림 · '+name
+            if role.name!=wanted:await role.edit(name=wanted,reason='소유자 요청: 모집 알림 역할임을 분명하게 표시')
+            continue
         all_roles=await guild.fetch_roles()
-        role=next((r for r in all_roles if r.id==store.get('games:pending:'+name) and r.name=='게임 · '+name),None)
+        role=next((r for r in all_roles if r.id==store.get('games:pending:'+name) and r.name in {'게임 · '+name,'모집 알림 · '+name}),None)
         if role is None:
-            if any(r.name=='게임 · '+name for r in all_roles):raise ValueError('동일 이름의 기존 게임 역할이 있어 자동 중복 생성을 중단합니다.')
-            role=await guild.create_role(name='게임 · '+name,permissions=discord.Permissions.none(),mentionable=False,hoist=False,reason='소유자 요청: 선택형 게임 모집 알림 역할')
+            if any(r.name=='모집 알림 · '+name for r in all_roles):raise ValueError('동일 이름의 기존 모집 알림 역할이 있어 자동 중복 생성을 중단합니다.')
+            role=await guild.create_role(name='모집 알림 · '+name,permissions=discord.Permissions.none(),mentionable=False,hoist=False,reason='소유자 요청: 선택형 게임 모집 알림 역할')
             store.put('games:pending:'+name,role.id)
         role_safe(guild,role)
         with store.connect() as db:db.execute('INSERT INTO game_roles VALUES (?,?)',(name,role.id))
         store.put('games:pending:'+name,0)
+    for kind,(label,names,_) in PROFILE_TAGS.items():
+        for position,name in enumerate(names,1):
+            with store.connect() as db:row=db.execute('SELECT role FROM profile_roles WHERE kind=? AND name=?',(kind,name)).fetchone()
+            wanted=PROFILE_ROLE_PREFIX[kind]+' · '+name
+            if row:
+                role=guild.get_role(row[0]);role_safe(guild,role)
+                if role.name!=wanted:await role.edit(name=wanted,reason='소유자 요청: 프로필 태그 이름 통일')
+                continue
+            all_roles=await guild.fetch_roles()
+            pending='profile:pending:'+kind+':'+name
+            role=next((r for r in all_roles if r.id==store.get(pending) and r.name==wanted),None)
+            if role is None:
+                if any(r.name==wanted for r in all_roles):raise ValueError('동일 이름의 기존 프로필 태그가 있어 자동 중복 생성을 중단합니다.')
+                role=await guild.create_role(name=wanted,permissions=discord.Permissions.none(),mentionable=False,hoist=False,
+                    reason='소유자 요청: 회원 직접 선택 프로필 태그')
+                store.put(pending,role.id)
+            role_safe(guild,role)
+            with store.connect() as db:db.execute('INSERT INTO profile_roles VALUES (?,?,?,?)',(kind,name,role.id,position))
+            store.put(pending,0)
     channels=await guild.fetch_channels()
     poll_channel=next((c for c in channels if c.id==store.get('community:poll-channel')),None)
     if poll_channel is None:
@@ -310,14 +383,19 @@ async def setup_community(guild,store,logger):
         permissions=readonly_overwrites(permissions,guild.default_role,clan,owner,guild.me)
         poll_channel=await guild.create_text_channel('┊일정',category=category,overwrites=permissions,reason='소유자 요청: 일정 투표 채널')
         store.put('community:poll-channel',poll_channel.id);store.put('entry:gated:'+str(poll_channel.id),poll_channel.id)
-    panels=[('community:hub','text:┊봇명령어','커뮤니티 메뉴','내 프로필·도감·게임 역할·음성방을 한 화면에서 관리하세요.',Hub(store)),
-            ('community:games','text:┊역할선택','게임 역할','관심 게임을 선택하면 해당 게임 모집 알림을 받을 수 있어요.',Hub(store)),
+    panels=[('community:hub','text:┊봇명령어','커뮤니티 메뉴','내 프로필·칭호 도감·프로필 태그·음성방을 한 화면에서 관리하세요.',Hub(store)),
+            ('community:games','text:┊역할선택','프로필 태그','대표 게임·플레이 성향·활동 시간과 파티 모집 알림을 직접 선택하세요.',Hub(store)),
             ('community:party-panel','text:┊파티모집','파티 모집','게임·시간·인원을 정하고 버튼으로 참여하세요. 게임 알림은 최초 모집 때 한 번만 전송돼요.',PartyPanel(store))]
     for key,channel_key,title,desc,view in panels:
-        if store.get(key):continue
         channel=guild.get_channel(store.get(channel_key) or 0)
         if not isinstance(channel,discord.TextChannel) or channel.id in PROTECTED_CHANNEL_IDS:raise ValueError('메뉴를 둘 채널을 확인할 수 없습니다.')
-        message=await channel.send(embed=discord.Embed(title=title,description=desc,colour=0xB8C8D8),view=view)
+        message=None
+        if store.get(key):
+            try:message=await channel.fetch_message(store.get(key))
+            except discord.NotFound:pass
+        embed=discord.Embed(title=title,description=desc,colour=0xB8C8D8)
+        if message is None:message=await channel.send(embed=embed,view=view)
+        else:await message.edit(embed=embed,view=view)
         store.put(key,message.id)
     if not store.get('community:poll-panel'):
         message=await poll_channel.send(embed=discord.Embed(title='일정 투표',description='선택지를 등록하고 함께할 시간을 정하세요. 한 사람 한 표이며 마감 전 변경할 수 있어요. 봇 휴식 중에도 마감 시간은 유지되고 재접속 후 결과를 반영해요.',colour=0xB8C8D8),view=PollPanel(store))
@@ -327,7 +405,7 @@ async def setup_community(guild,store,logger):
     trigger=guild.get_channel(store.get('voice:＋ 새로운 방') or 0)
     if not isinstance(trigger,discord.VoiceChannel):raise ValueError('개인 음성방 생성용 입장방을 확인할 수 없습니다.')
     logger.warning('개인 음성방 기능 활성 · 생성 입장방 %s · 본인 방 이름/인원/잠금 관리 · 생성한 빈 방만 정리',trigger.id)
-    logger.warning('커뮤니티 메뉴 준비 완료 · 게임 역할6종/파티모집/일정투표/내프로필/칭호도감 · 일정채널 %s',poll_channel.id)
+    logger.warning('커뮤니티 메뉴 준비 완료 · 프로필 태그14종/모집 알림6종/파티모집/일정투표/내프로필/칭호도감 · 일정채널 %s',poll_channel.id)
 
 
 class CommunityWorker:

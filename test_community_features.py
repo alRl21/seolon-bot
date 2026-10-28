@@ -12,6 +12,7 @@ from collection_rewards import claim_completed,sync_hidden_roles,grant_owner_tes
 from community_store import initialise_community,create_party,join_party,party_members,create_poll,vote,counts,close_item
 from items_store import initialise_items,item_rows,buy_item,redeem_voucher,use_theme,grant_voucher
 from voice_rooms import cleanup_room,voice_update
+from community_ui import ProfileTagsView,PROFILE_TAGS
 
 class CommunityDatabaseTests(unittest.TestCase):
     def setUp(self):
@@ -109,6 +110,21 @@ class CommunityDatabaseTests(unittest.TestCase):
 
 
 class HiddenRoleSyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_profile_tag_picker_enforces_compact_role_limits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(Path(tmp)/'db');initialise_community(s)
+            profile_rows=[];rid=100
+            with s.connect() as db:
+                for kind,(_,names,_) in PROFILE_TAGS.items():
+                    for position,name in enumerate(names,1):
+                        db.execute('INSERT INTO profile_roles VALUES (?,?,?,?)',(kind,name,rid,position))
+                        profile_rows.append((kind,name,rid,position));rid+=1
+            member=SimpleNamespace(roles=[]);games=[(name,200+n) for n,name in enumerate(('발로란트','롤'))]
+            view=ProfileTagsView(s,2,member,profile_rows,games)
+            selects=[c for c in view.children if isinstance(c,discord.ui.Select)]
+            self.assertEqual([c.max_values for c in selects],[1,2,1,2])
+            self.assertEqual(len(profile_rows),14)
+
     async def test_legacy_series_rewards_become_one_global_hidden_title(self):
         with tempfile.TemporaryDirectory() as tmp:
             s=Store(Path(tmp)/'db');initialise_titles(s)
@@ -130,7 +146,7 @@ class HiddenRoleSyncTests(unittest.IsolatedAsyncioTestCase):
             with patch('titles_ui.role_safe'):
                 await ensure_collections(guild,s,Mock())
             catalog=rows(s,GUILD_ID);hidden=[r for r in catalog if r['hidden']]
-            self.assertEqual([(r['name'],r['series']) for r in hidden],[('설연무궁','구매 불가 칭호')])
+            self.assertEqual([(r['name'],r['series']) for r in hidden],[('설연무궁','설온의 비록')])
             self.assertEqual(len([r for r in catalog if not r['hidden']]),8)
             with s.connect() as db:
                 self.assertEqual(db.execute('SELECT series,reward FROM title_collections').fetchall(),[('전체 수집 보상',hidden[0]['id'])])

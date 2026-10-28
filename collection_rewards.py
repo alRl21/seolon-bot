@@ -7,7 +7,8 @@ from operations_store import event
 from titles_store import rows,create_title
 
 GLOBAL_COLLECTION='전체 수집 보상'
-GLOBAL_SERIES='구매 불가 칭호'
+GLOBAL_SERIES='설온의 비록'
+LEGACY_GLOBAL_SERIES='구매 불가 칭호'
 GLOBAL_REWARD=('설연무궁','雪緣無窮','눈처럼 맺힌 모든 인연을 끝없이 품은 자')
 LEGACY_REWARD_NAMES={'설월무극','연화불멸'}
 
@@ -119,6 +120,10 @@ async def ensure_collections(guild,store,logger):
     name,hanja,meaning=GLOBAL_REWARD
     TITLE_MEANINGS[name]=(hanja,meaning)
     initialise_collections(store)
+    old_separator=store.get('roles:series:'+LEGACY_GLOBAL_SERIES)
+    if old_separator and not store.get('roles:series:'+GLOBAL_SERIES):
+        store.put('roles:series:'+GLOBAL_SERIES,old_separator)
+        with store.connect() as db:db.execute('DELETE FROM objects WHERE key=?',('roles:series:'+LEGACY_GLOBAL_SERIES,))
     catalog=rows(store,GUILD_ID)
     with store.connect() as db:
         old_rewards={r[0] for r in db.execute('SELECT reward FROM title_collections')}

@@ -1,7 +1,7 @@
 import time
 from operations_store import event
 
-KINDS = {'sale':'상시 판매', 'limited':'한정 판매', 'grant':'한정 · 구매 불가'}
+KINDS = {'sale':'상시 판매', 'limited':'한정 판매', 'grant':'특별 수여'}
 
 
 def initialise_titles(store):
@@ -61,7 +61,7 @@ def configure_sale(store,guild,tid,price,ends_at,stock,actor):
         db.execute('BEGIN IMMEDIATE')
         row=db.execute('SELECT kind,sold FROM titles WHERE guild=? AND id=?',(guild,tid)).fetchone()
         if row is None or row[0]=='grant':
-            raise ValueError('지급 전용 칭호는 판매할 수 없습니다.')
+            raise ValueError('특별 수여 칭호는 판매할 수 없습니다.')
         if row[0]=='limited' and ends_at is None and stock is None:
             raise ValueError('한정 판매는 종료일 또는 수량이 필요합니다.')
         if stock is not None and stock<row[1]:

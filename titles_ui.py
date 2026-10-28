@@ -200,7 +200,7 @@ class TitlePicker(discord.ui.View):
         self.store,self.choices,self.mode,self.user,self.page=store,choices,mode,user,page
         selected=choices[page*25:(page+1)*25]
         select=discord.ui.Select(placeholder='칭호를 선택하세요',options=[discord.SelectOption(label=r['name'][:100],value=str(r['id']),
-            description=(r['series']+(' · 히든 · ' if r['tier']==5 else f" · {r['tier']}단계 · " )+KINDS[r['kind']] + (f" · {r['price']:,}눈송이" if r['kind']!='grant' else ' · 구매 불가'))[:100]) for r in selected])
+            description=(r['series']+(' · 히든 · ' if r['tier']==5 else f" · {r['tier']}단계 · " )+KINDS[r['kind']] + (f" · {r['price']:,}눈송이" if r['kind']!='grant' else ''))[:100]) for r in selected])
         async def pick(i):
             row=get_title(store,GUILD_ID,int(select.values[0]))
             if row is None: raise ValueError('칭호가 없습니다.')
@@ -254,7 +254,7 @@ class TitleAction(TitlePicker):
         owned=any(r['id']==tid for r in rows(store,GUILD_ID,user))
         if mode=='shop' and row and (row['kind']=='grant' or not row['selling'] or owned):
             buy.disabled=True
-            buy.label='이미 보유 중' if owned else '구매 불가'
+            buy.label='이미 보유 중' if owned else ('특별 수여' if row['kind']=='grant' else '현재 판매하지 않음')
         if mode!='shop' and row and row['tier']==5:
             buy.disabled=True;buy.label='조건 충족 시 자동 장착'
         self.add_item(buy)
@@ -388,7 +388,7 @@ async def setup_titles(guild,store,logger):
             channels=await guild.fetch_channels()
             channel=next((c for c in channels if c.id==cid and isinstance(c,discord.TextChannel)),None)
             if channel is None or channel.id in PROTECTED_CHANNEL_IDS: raise ValueError('칭호 상점 채널을 확인할 수 없습니다.')
-            embed=discord.Embed(title='칭호 상점',colour=0xB8C8D8,description='눈송이로 칭호를 모아 보세요.\n여러 칭호를 보유하고, 한 번에 하나만 착용할 수 있어요.\n상시 판매 · 기간/수량 한정 판매 · 관리자 지급 전용\n판매가 끝나도 이미 얻은 칭호는 계속 사용할 수 있어요.\n상점과 보유 칭호는 아래 버튼으로 확인하세요.')
+            embed=discord.Embed(title='칭호 상점',colour=0xB8C8D8,description='눈송이로 칭호를 모아 보세요.\n여러 칭호를 보유하고, 한 번에 하나만 착용할 수 있어요.\n상시 판매 · 기간/수량 한정 판매 · 특별 수여\n판매가 끝나도 이미 얻은 칭호는 계속 사용할 수 있어요.\n상점과 보유 칭호는 아래 버튼으로 확인하세요.')
             m=await channel.send(embed=embed,view=ShopPanel(store))
             store.put('titles:panel',m.id)
     if store.get('titles:panel-version')!=4:

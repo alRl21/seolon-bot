@@ -7,6 +7,9 @@ def initialise_community(store):
     with store.connect() as db:
         db.executescript('''
         CREATE TABLE IF NOT EXISTS game_roles(name TEXT PRIMARY KEY,role INTEGER NOT NULL UNIQUE);
+        CREATE TABLE IF NOT EXISTS profile_roles(
+          kind TEXT NOT NULL,name TEXT NOT NULL,role INTEGER NOT NULL UNIQUE,position INTEGER NOT NULL,
+          PRIMARY KEY(kind,name));
         CREATE TABLE IF NOT EXISTS parties(id INTEGER PRIMARY KEY AUTOINCREMENT,owner INTEGER NOT NULL,
           game TEXT NOT NULL,starts INTEGER NOT NULL,capacity INTEGER NOT NULL,description TEXT NOT NULL,
           channel INTEGER,message INTEGER,status TEXT NOT NULL DEFAULT 'draft',created INTEGER NOT NULL);

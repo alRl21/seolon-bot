@@ -2,9 +2,10 @@ import discord
 
 DIVIDER_WAVE='〜'
 DIVIDER_TAIL=DIVIDER_WAVE*14
-LABELS={'titles':f'{DIVIDER_WAVE*6} ୨୧ 칭 호 ୨୧ {DIVIDER_TAIL}','basic':'── 기본 ──','staff':'── 관리자 ──','games':'── 게임 ──'}
+LABELS={'titles':f'{DIVIDER_WAVE*6} ୨୧ 칭 호 ୨୧ {DIVIDER_TAIL}','basic':'── 기본 ──','staff':'── 관리자 ──','games':'〜〜 ୨ 게임과 프로필 ୧ 〜〜'}
+PROFILE_SECTION_LABELS={'primary':'〜 ꒰ 대표 게임 ꒱ 〜','style':'〜 ꒰ 플레이 성향 ꒱ 〜','time':'〜 ꒰ 활동 시간 ꒱ 〜','alerts':'〜 ꒰ 모집 알림 ꒱ 〜'}
 TITLE_DIVIDER_COLOUR=0xD9E5F0
-SERIES_DIVIDER_COLOURS={'설월의 시':0xBFD9EF,'인연의 서약':0xD7C8EE}
+SERIES_DIVIDER_COLOURS={'설월의 시':0xBFD9EF,'인연의 서약':0xD7C8EE,'설온의 비록':0xD8B86A}
 
 
 def series_label(series):
@@ -60,13 +61,18 @@ async def organise_roles(guild,store,logger):
         title_series={r[0]:r[1] for r in title_rows}
         title_order={r[0]:(r[2],r[3],r[0]) for r in title_rows}
         title_ids=set(title_series)
-        game_ids={r[0] for r in db.execute('SELECT role FROM game_roles')} if db.execute("SELECT 1 FROM sqlite_master WHERE name='game_roles'").fetchone() else set()
+        alert_ids={r[0] for r in db.execute('SELECT role FROM game_roles')} if db.execute("SELECT 1 FROM sqlite_master WHERE name='game_roles'").fetchone() else set()
+        profile_kind={r[0]:r[1] for r in db.execute('SELECT role,kind FROM profile_roles')} if db.execute("SELECT 1 FROM sqlite_master WHERE name='profile_roles'").fetchone() else {}
+        game_kind={rid:'alerts' for rid in alert_ids}|profile_kind
+        game_ids=set(game_kind)
         series_separators={r[0][len('roles:series:'):]:r[1] for r in db.execute("SELECT key,id FROM objects WHERE key LIKE 'roles:series:%'")}
+        profile_sections={kind:store.get('roles:profile-section:'+kind) for kind in PROFILE_SECTION_LABELS}
     roles=await guild.fetch_roles()
     bot_ids={r.id for r in guild.me.roles}
     top=max(r for r in roles if r.id in bot_ids)
     separators={key:store.get('roles:separator:'+key) for key in LABELS}
-    groups=group_ids(roles,title_ids,set(separators.values()) | set(series_separators.values()),top,guild.default_role.id,game_ids)
+    extra_separators=set(series_separators.values())|{rid for rid in profile_sections.values() if rid}
+    groups=group_ids(roles,title_ids,set(separators.values()) | extra_separators,top,guild.default_role.id,game_ids)
     for key,ids in groups.items():
         if not ids:continue
         separator=next((r for r in roles if r.id==separators[key]),None)
@@ -83,6 +89,17 @@ async def organise_roles(guild,store,logger):
         wanted_colour=divider_colour(key)
         if separator.name!=LABELS[key] or separator.colour.value!=wanted_colour:
             await separator.edit(name=LABELS[key],colour=discord.Colour(wanted_colour),reason='소유자 요청: 역할 구분선을 장식 표찰로 표시')
+    for kind,label in PROFILE_SECTION_LABELS.items():
+        if not any(game_kind.get(rid)==kind for rid in game_ids):continue
+        separator=next((r for r in roles if r.id==profile_sections.get(kind)),None)
+        if separator is None:
+            if any(r.name==label for r in roles):raise ValueError('같은 이름의 프로필 역할 구분선이 있어 중단합니다.')
+            separator=await guild.create_role(name=label,permissions=discord.Permissions.none(),colour=discord.Colour(0xAFC4D6),
+                hoist=False,mentionable=False,reason='소유자 요청: 프로필 태그 세부 구분선 · 권한 없음')
+            store.put('roles:profile-section:'+kind,separator.id);profile_sections[kind]=separator.id
+        if separator.permissions.value or separator.managed:raise ValueError('프로필 태그 구분선 권한이 변경되어 정렬을 중단합니다.')
+        if separator.name!=label or separator.colour.value!=0xAFC4D6:
+            await separator.edit(name=label,colour=discord.Colour(0xAFC4D6),reason='소유자 요청: 프로필 태그 구분선 통일')
     active_series=sorted({title_series[rid] for rid in groups['titles']})
     for series in active_series:
         separator=next((r for r in roles if r.id==series_separators.get(series)),None)
@@ -100,7 +117,8 @@ async def organise_roles(guild,store,logger):
     roles=await guild.fetch_roles()
     indexed={r.id:r for r in roles}
     top=max(r for r in roles if r.id in bot_ids)
-    groups=group_ids(roles,title_ids,set(separators.values()) | set(series_separators.values()),top,guild.default_role.id,game_ids)
+    extra_separators=set(series_separators.values())|{rid for rid in profile_sections.values() if rid}
+    groups=group_ids(roles,title_ids,set(separators.values()) | extra_separators,top,guild.default_role.id,game_ids)
     desired=[]
     for key in ['titles','games','basic','staff']:
         if groups[key]:
@@ -108,6 +126,11 @@ async def organise_roles(guild,store,logger):
                 for series in reversed(active_series):
                     desired.extend(sorted((rid for rid in groups[key] if title_series[rid]==series),key=lambda rid:title_order[rid],reverse=True))
                     desired.append(series_separators[series])
+            elif key=='games':
+                for kind in ['alerts','time','style','primary']:
+                    subgroup=[rid for rid in groups[key] if game_kind.get(rid)==kind]
+                    if subgroup:
+                        desired.extend(subgroup);desired.append(profile_sections[kind])
             else:
                 desired.extend(groups[key])
             desired.append(separators[key])
@@ -121,4 +144,4 @@ async def organise_roles(guild,store,logger):
     actual=[r.id for r in sorted(after) if r.id in set(desired)]
     if actual!=desired:raise RuntimeError('역할 구역 정렬 확인 실패')
     higher=[r.name for r in after if r.id not in bot_ids and not r.managed and r.id!=guild.default_role.id and r>=top]
-    logger.warning('역할 구역 정리 완료 · 큰 칭호/세트 구분선 · 칭호 세트 %s · 장식 칭호 %s개 · 봇보다 높은 기존 역할 유지: %s',', '.join(active_series),len(title_ids),', '.join(higher) or '없음')
+    logger.warning('역할 구역 정리 완료 · 칭호 세트 %s · 장식 칭호 %s개 · 프로필 태그 %s개/모집 알림 %s개 · 봇보다 높은 기존 역할 유지: %s',', '.join(active_series),len(title_ids),len(profile_kind),len(alert_ids),', '.join(higher) or '없음')
