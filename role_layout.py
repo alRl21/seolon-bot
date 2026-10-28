@@ -1,12 +1,14 @@
 import discord
 
-LABELS={'titles':'꒰ ✦ ⊹ 칭호 ⊹ ✦ ꒱','basic':'── 기본 ──','staff':'── 관리자 ──','games':'── 게임 ──'}
+DIVIDER_WAVE='〜'
+DIVIDER_TAIL=DIVIDER_WAVE*14
+LABELS={'titles':f'{DIVIDER_WAVE*6} ୨୧ 칭 호 ୨୧ {DIVIDER_TAIL}','basic':'── 기본 ──','staff':'── 관리자 ──','games':'── 게임 ──'}
 TITLE_DIVIDER_COLOUR=0xD9E5F0
 SERIES_DIVIDER_COLOURS={'설월의 시':0xBFD9EF,'인연의 서약':0xD7C8EE}
 
 
 def series_label(series):
-    return '「 ✧ '+series+' ✧ 」'
+    return f'{DIVIDER_WAVE*6} ꒰ {series} ꒱ {DIVIDER_TAIL}'
 
 
 def divider_colour(key,series=None):
