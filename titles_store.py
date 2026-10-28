@@ -1,7 +1,7 @@
 import time
 from operations_store import event
 
-KINDS = {'sale':'상시 판매', 'limited':'한정 판매', 'grant':'지급 전용'}
+KINDS = {'sale':'상시 판매', 'limited':'한정 판매', 'grant':'한정 · 구매 불가'}
 
 
 def initialise_titles(store):

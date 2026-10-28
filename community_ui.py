@@ -87,25 +87,24 @@ async def show_codex(i,store,series=None):
     from collection_rewards import completion_state,sync_hidden_roles
     await sync_hidden_roles(i.guild,store,{i.user.id})
     catalog=rows(store,GUILD_ID);owned={r['id'] for r in rows(store,GUILD_ID,i.user.id)}
-    with store.connect() as db:
-        definitions=db.execute('SELECT series,requirements,reward FROM title_collections ORDER BY series').fetchall()
-        state=completion_state(db,GUILD_ID,i.user.id)
-    if not definitions:
+    series_names=sorted({r['series'] for r in catalog if not r['hidden'] and 1<=r['tier']<=4})
+    with store.connect() as db:state=completion_state(db,GUILD_ID,i.user.id)
+    if not series_names:
         await render(i,content='아직 등록된 도감 세트가 없어요.',view=Hub(store,i.user.id));return
-    selected=next((r for r in definitions if r[0]==series),definitions[0])
-    name,required,reward=selected;ids=json.loads(required)
-    titles=[r for r in catalog if r['id'] in ids];titles.sort(key=lambda r:r['tier'])
+    name=series if series in series_names else series_names[0]
+    titles=[r for r in catalog if r['series']==name and not r['hidden'] and 1<=r['tier']<=4]
+    titles.sort(key=lambda r:r['tier']);ids={r['id'] for r in titles}
     lines=[f"{r['tier']}단계 · {r['name']} · {'보유' if r['id'] in owned else '미보유'}" for r in titles]
     reward_names=[r['name'] for r in catalog if r['id'] in state['rewards']]
     embed=discord.Embed(title=name+' · 칭호 도감',description='\n'.join(lines),colour=0xC59A3C)
     embed.add_field(name='현재 세트',value=f'{len(set(ids)&owned)}/{len(ids)}')
     embed.add_field(name='전체 구매형',value=f"{len(state['purchasable']&owned)}/{len(state['purchasable'])}")
-    embed.add_field(name='지급 전용',value='조건 충족' if state['grant_only']&owned else '최소 1개 필요')
+    embed.add_field(name='한정 · 구매 불가',value='조건 충족' if state['grant_only']&owned else '최소 1개 필요')
     reward_text=' · '.join(reward_names) if state['eligible'] else '???'
-    embed.add_field(name='자동 히든',value=(reward_text+' · 자동 장착 중') if state['eligible'] else '구매 가능한 칭호 전체와 지급 전용 칭호 1개 이상을 모으면 자동 장착돼요.',inline=False)
+    embed.add_field(name='통합 히든',value=(reward_text+' · 자동 장착 중') if state['eligible'] else '구매 가능한 칭호 전체와 한정 칭호 1개 이상을 모으면 자동 장착돼요.',inline=False)
     if earned:embed.set_footer(text='히든 칭호를 획득해 자동 장착했어요.')
     view=Hub(store,i.user.id)
-    select=discord.ui.Select(placeholder='도감 세트 선택',options=[discord.SelectOption(label=r[0],value=r[0],default=r[0]==name) for r in definitions[:25]])
+    select=discord.ui.Select(placeholder='도감 세트 선택',options=[discord.SelectOption(label=s,value=s,default=s==name) for s in series_names[:25]])
     async def pick(j):await show_codex(j,store,select.values[0])
     select.callback=pick;view.add_item(select)
     await render(i,embed=embed,view=view)

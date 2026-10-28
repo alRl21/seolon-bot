@@ -270,8 +270,8 @@ class TitleAction(TitlePicker):
 def detail_embed(row):
     import time
     desc='세트: '+row['series']+(' · 히든\n' if row.get('tier')==5 else f" · {row.get('tier',1)}단계\n")+KINDS[row['kind']]
-    if row.get('tier')==5:desc+=' · 전체 구매형 칭호와 지급 전용 칭호 1개 이상 보유 시 자동 장착'
-    elif row['kind']=='grant': desc+=' · 관리자 지급으로만 획득'
+    if row.get('tier')==5:desc+=' · 구매 가능한 칭호 전체와 한정 칭호 1개 이상 보유 시 자동 장착'
+    elif row['kind']=='grant': desc+=' · 한정 칭호 · 관리자 지급으로만 획득'
     else:
         desc+=f"\n가격: {row['price']:,}눈송이"
         if not row['selling']: desc+='\n판매 중지'
@@ -394,7 +394,7 @@ async def setup_titles(guild,store,logger):
     if store.get('titles:panel-version')!=4:
         channel=guild.get_channel(store.get('text:┊눈꽃상점') or 0)
         message=await channel.fetch_message(store.get('titles:panel'))
-        embed=discord.Embed(title='상점',colour=0xB8C8D8,description='눈송이로 칭호와 아이템을 구매하세요.\n상점 → 칭호 / 아이템 · 구매한 물건은 내 가방에서 사용\n칭호 교환권은 상점에서 판매하지 않는 관리자 지급 전용 특별권이에요.\n교환권은 히든을 제외한 미보유 칭호 하나와 교환할 수 있어요.\n구매 가능한 칭호 전체와 지급 전용 칭호 1개 이상을 모으면 히든 칭호가 자동 장착돼요. 새 칭호가 추가되어 조건이 부족해지면 다시 회수됩니다.')
+        embed=discord.Embed(title='상점',colour=0xB8C8D8,description='눈송이로 칭호와 아이템을 구매하세요.\n상점 → 칭호 / 아이템 · 구매한 물건은 내 가방에서 사용\n칭호 교환권은 상점에서 판매하지 않는 관리자 지급 전용 특별권이에요.\n교환권은 히든을 제외한 미보유 칭호 하나와 교환할 수 있어요.\n구매 가능한 칭호 전체와 한정 칭호 1개 이상을 모으면 통합 히든 칭호가 자동 장착돼요. 새 구매형 칭호가 추가되어 조건이 부족해지면 다시 회수됩니다.')
         await message.edit(embed=embed,view=ShopPanel(store))
         store.put('titles:panel-version',4)
     from collection_rewards import ensure_collections

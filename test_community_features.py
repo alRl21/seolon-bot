@@ -8,7 +8,7 @@ from unittest.mock import Mock,AsyncMock,patch
 import discord
 from core import Store,GUILD_ID,PROTECTED_CHANNEL_IDS
 from titles_store import initialise_titles,create_title,grant,purchase,rows,revoke
-from collection_rewards import claim_completed,sync_hidden_roles,grant_owner_test_titles
+from collection_rewards import claim_completed,sync_hidden_roles,grant_owner_test_titles,ensure_collections
 from community_store import initialise_community,create_party,join_party,party_members,create_poll,vote,counts,close_item
 from items_store import initialise_items,item_rows,buy_item,redeem_voucher,use_theme,grant_voucher
 from voice_rooms import cleanup_room,voice_update
@@ -109,6 +109,33 @@ class CommunityDatabaseTests(unittest.TestCase):
 
 
 class HiddenRoleSyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_legacy_series_rewards_become_one_global_hidden_title(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(Path(tmp)/'db');initialise_titles(s)
+            visible=[]
+            for series,kind,start in [('설월의 시','sale',10),('인연의 서약','grant',20)]:
+                for tier in range(1,5):
+                    tid=create_title(s,GUILD_ID,f'{series}{tier}',start+tier,kind,100 if kind=='sale' else 0,False,9,series)
+                    visible.append(tid)
+                    with s.connect() as db:db.execute('UPDATE titles SET tier=? WHERE id=?',(tier,tid))
+            old_a=create_title(s,GUILD_ID,'설월무극',31,'grant',0,True,9,'설월의 시')
+            old_b=create_title(s,GUILD_ID,'연화불멸',32,'grant',0,True,9,'인연의 서약')
+            with s.connect() as db:
+                db.execute('UPDATE titles SET tier=5 WHERE id IN (?,?)',(old_a,old_b))
+                db.execute('INSERT INTO title_collections VALUES (?,?,?)',('설월의 시',json.dumps(visible[:4]),old_a))
+                db.execute('INSERT INTO title_collections VALUES (?,?,?)',('인연의 서약',json.dumps(visible[4:]),old_b))
+            role_a=SimpleNamespace(id=31,name='⟡ 설월무극',colour=SimpleNamespace(value=0xC59A3C),edit=AsyncMock(),delete=AsyncMock())
+            role_b=SimpleNamespace(id=32,name='⟡ 연화불멸',colour=SimpleNamespace(value=0xC59A3C),edit=AsyncMock(),delete=AsyncMock())
+            guild=Mock();guild.id=GUILD_ID;guild.fetch_roles=AsyncMock(return_value=[role_a,role_b]);guild.create_role=AsyncMock()
+            with patch('titles_ui.role_safe'):
+                await ensure_collections(guild,s,Mock())
+            catalog=rows(s,GUILD_ID);hidden=[r for r in catalog if r['hidden']]
+            self.assertEqual([(r['name'],r['series']) for r in hidden],[('설연무궁','구매 불가 칭호')])
+            self.assertEqual(len([r for r in catalog if not r['hidden']]),8)
+            with s.connect() as db:
+                self.assertEqual(db.execute('SELECT series,reward FROM title_collections').fetchall(),[('전체 수집 보상',hidden[0]['id'])])
+            role_a.edit.assert_awaited_once();role_b.delete.assert_awaited_once();guild.create_role.assert_not_awaited()
+
     async def test_hidden_role_is_added_and_removed_when_new_sale_title_appears(self):
         with tempfile.TemporaryDirectory() as tmp:
             s=Store(Path(tmp)/'db');initialise_titles(s)
