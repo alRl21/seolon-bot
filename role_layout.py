@@ -138,8 +138,12 @@ async def organise_roles(guild,store,logger):
         raise ValueError('봇보다 높은 역할은 이동할 수 없습니다.')
     current=[r.id for r in sorted(roles) if r.id in set(desired)]
     if current!=desired:
-        await guild.edit_role_positions(positions={indexed[rid]:n for n,rid in enumerate(desired,1)},
-            reason='소유자 요청: 관리자·기본·칭호 구역 정리 · 권한과 회원 배정 유지')
+        try:
+            await guild.edit_role_positions(positions={indexed[rid]:n for n,rid in enumerate(desired,1)},
+                reason='소유자 요청: 관리자·기본·칭호 구역 정리 · 권한과 회원 배정 유지')
+        except discord.HTTPException as exc:
+            logger.warning('역할 구역 자동 정렬 보류 · Discord가 기존 역할 순서 이동을 거부함 · 새 프로필 태그와 선택 기능은 정상 사용 가능: %s',exc)
+            return
     after=await guild.fetch_roles()
     actual=[r.id for r in sorted(after) if r.id in set(desired)]
     if actual!=desired:raise RuntimeError('역할 구역 정렬 확인 실패')
