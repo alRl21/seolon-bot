@@ -12,7 +12,7 @@ from discord import app_commands
 from core import GUILD_ID, LAYOUT, Store, PROTECTED_CHANNEL_IDS, ARCHIVE_NAME, VOICE_NAMES
 from schedule import active_seconds
 from reset_ui import show_reset
-from membership import show_gate, JoinRequestView, safe_clan_role, configure_once, setup_admin_chat, correct_clan_role
+from membership import show_gate, JoinRequestView, MembershipReviewView, safe_clan_role, configure_once, setup_admin_chat, correct_clan_role
 from arrange import arrange_categories
 from channel_policy import setup_channel_policy
 from attendance_ui import AttendanceView, setup_attendance
@@ -75,6 +75,7 @@ class Client(discord.Client):
         self._connection._intents.message_content = bool(available)
         log.warning('문의 대화 기록 권한: %s', '활성' if available else '비활성 · 내용 누락 시 문의 삭제 차단')
         self.add_view(JoinRequestView(store))
+        self.add_view(MembershipReviewView(store))
         self.add_view(AttendanceView(store))
         self.add_view(TicketPanel(store))
         self.add_view(CloseTicketView(store))

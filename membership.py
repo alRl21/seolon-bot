@@ -1,4 +1,5 @@
 import copy
+import asyncio
 import io
 import json
 import logging
@@ -16,6 +17,8 @@ ENTRY_LOG = '┊입장로그'
 ENTRY_ROLE = '┊역할받기'
 CLAN_ROLE = '클랜원'
 CLAN_ROLE_ID = 1522946198984593541
+DIVIDER_ROLE_ID = 1564610500308897869
+APPROVAL_LOCK = asyncio.Lock()
 OPS_CATEGORY = '── ⟡ 설온 운영실 ⟡ ──'
 ENTRY_LOG_CHANNEL_ID = 1523611752837681192
 MUSIC_CHANNEL_ID = 1522946795217490141
@@ -218,9 +221,9 @@ class JoinRequestView(discord.ui.View):
             mentions += f' <@{owner_id}>'
         embed = discord.Embed(title='클랜 가입 신청 재알림' if repeat else '새 클랜 가입 신청', colour=0xB8C8D8,
             description=f'신청자: <@{interaction.user.id}>\n사용자 ID: `{interaction.user.id}`\n관리자 확인을 기다리고 있습니다.')
-        embed.set_footer(text='같은 신청자의 관리자 호출은 10분에 한 번만 전달됩니다.')
+        embed.set_footer(text=f'신청자 ID: {interaction.user.id} · 같은 신청자의 관리자 호출은 10분에 한 번만 전달됩니다.')
         try:
-            await channel.send(content=(mentions.strip() + '\n클랜 가입 신청을 확인해 주세요.'), embed=embed,
+            await channel.send(content=(mentions.strip() + '\n클랜 가입 신청을 확인해 주세요.'), embed=embed, view=MembershipReviewView(self.store),
                 allowed_mentions=discord.AllowedMentions(everyone=False, roles=admins,
                     users=[discord.Object(id=owner_id)] if owner_id else [], replied_user=False))
         except discord.HTTPException:
@@ -230,6 +233,108 @@ class JoinRequestView(discord.ui.View):
         unlock = int(time.time()) + 600
         await interaction.followup.send('관리자 채널에 알림을 보냈습니다. 확인할 때까지 기다려 주세요.\n'
                                        f'다음 관리자 호출: <t:{unlock}:R>', ephemeral=True)
+
+
+def review_target(interaction):
+    if interaction.guild_id != GUILD_ID or interaction.channel_id != ADMIN_CHAT_CHANNEL_ID:
+        raise ValueError('관리자 채팅의 가입 신청에서만 사용할 수 있습니다.')
+    if not (interaction.user.id == interaction.guild.owner_id or interaction.permissions.administrator):
+        raise ValueError('서버 관리자만 처리할 수 있습니다.')
+    if not interaction.message or not interaction.message.embeds:
+        raise ValueError('신청 정보를 확인할 수 없습니다.')
+    footer = interaction.message.embeds[0].footer.text or ''
+    prefix = '신청자 ID: '
+    if not footer.startswith(prefix):
+        raise ValueError('이전 신청 알림입니다. 신청자가 다시 신청하면 새 버튼을 사용할 수 있습니다.')
+    try:
+        return int(footer[len(prefix):].split(' · ', 1)[0])
+    except ValueError:
+        raise ValueError('신청자 정보를 확인할 수 없습니다.')
+
+
+def pending_request(store, user_id):
+    with store.connect() as db:
+        row = db.execute('SELECT state FROM membership_requests WHERE user=?', (user_id,)).fetchone()
+        return row is not None and row[0] == 'pending'
+
+
+class ApprovalModal(discord.ui.Modal, title='클랜 가입 승인'):
+    nickname = discord.ui.TextInput(label='서버에서 사용할 이름', placeholder='승인할 회원의 서버 별명', min_length=1, max_length=32)
+
+    def __init__(self, store, user_id, message):
+        super().__init__(timeout=300)
+        self.store, self.user_id, self.message = store, user_id, message
+
+    async def on_submit(self, interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with APPROVAL_LOCK:
+            try:
+                if interaction.guild_id != GUILD_ID or interaction.channel_id != ADMIN_CHAT_CHANNEL_ID or not (interaction.user.id == interaction.guild.owner_id or interaction.permissions.administrator):
+                    raise ValueError('서버 관리자만 처리할 수 있습니다.')
+                if not pending_request(self.store, self.user_id):
+                    raise ValueError('이미 처리되었거나 대기 중이 아닌 신청입니다.')
+                nickname = str(self.nickname).strip()
+                if not nickname:
+                    raise ValueError('서버 이름을 입력해 주세요.')
+                guild = interaction.guild
+                member = await guild.fetch_member(self.user_id)
+                if member.bot:
+                    raise ValueError('봇 계정은 승인할 수 없습니다.')
+                if not guild.me.guild_permissions.manage_roles or not guild.me.guild_permissions.manage_nicknames:
+                    raise ValueError('봇에 역할 관리와 별명 관리 권한이 필요합니다.')
+                roles = [guild.get_role(DIVIDER_ROLE_ID), guild.get_role(CLAN_ROLE_ID)]
+                if any(r is None for r in roles):
+                    raise ValueError('지정한 구분선 또는 클랜원 역할을 찾을 수 없습니다.')
+                if any(r.managed or r >= guild.me.top_role for r in roles):
+                    raise ValueError('두 역할을 모두 설온지기 역할보다 아래로 옮겨 주세요.')
+                if roles[0].permissions.value != 0 or not safe_clan_role(roles[1]):
+                    raise ValueError('구분선 역할은 권한이 없어야 하며 클랜원 역할에 관리 권한이 없어야 합니다.')
+                if member.id == guild.owner_id or member.top_role >= guild.me.top_role:
+                    raise ValueError('신청자의 역할이 봇보다 높아 별명을 변경할 수 없습니다.')
+                await member.edit(nick=nickname, reason='관리자 승인: 설온 서버 별명 설정')
+                try:
+                    await member.add_roles(*roles, reason='관리자 승인: 구분선과 클랜원 역할 지급')
+                except discord.HTTPException:
+                    raise ValueError('별명은 변경되었지만 역할 지급에 실패했습니다. 봇 권한과 역할 순서를 확인한 후 다시 승인해 주세요.')
+                self.store.membership_state(self.user_id, 'approved')
+                try:
+                    await self.message.edit(view=None)
+                    await interaction.channel.send(f'가입 승인 완료 · <@{self.user_id}> · 서버 이름: {discord.utils.escape_mentions(nickname)} · 처리: <@{interaction.user.id}>', allowed_mentions=discord.AllowedMentions.none())
+                except discord.HTTPException:
+                    logging.getLogger('seolon').exception('가입 승인 결과 메시지 갱신 실패')
+                await interaction.followup.send('가입 승인 완료: 서버 이름과 구분선·클랜원 역할을 적용했습니다.', ephemeral=True)
+            except (discord.HTTPException, ValueError) as exc:
+                await interaction.followup.send(f'가입 승인 실패: {str(exc)[:500]}', ephemeral=True)
+
+
+class MembershipReviewView(discord.ui.View):
+    def __init__(self, store):
+        super().__init__(timeout=None)
+        self.store = store
+
+    @discord.ui.button(label='승인', style=discord.ButtonStyle.success, custom_id='seolon:membership-approve:v1')
+    async def approve(self, interaction, button):
+        try:
+            user_id = review_target(interaction)
+            if not pending_request(self.store, user_id):
+                raise ValueError('이미 처리되었거나 대기 중이 아닌 신청입니다.')
+            await interaction.response.send_modal(ApprovalModal(self.store, user_id, interaction.message))
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+
+    @discord.ui.button(label='거절', style=discord.ButtonStyle.danger, custom_id='seolon:membership-reject:v1')
+    async def reject(self, interaction, button):
+        try:
+            user_id = review_target(interaction)
+            async with APPROVAL_LOCK:
+                if not pending_request(self.store, user_id):
+                    raise ValueError('이미 처리되었거나 대기 중이 아닌 신청입니다.')
+                self.store.membership_state(user_id, 'rejected')
+            await interaction.response.edit_message(view=None)
+            await interaction.followup.send(f'가입 신청을 거절했습니다: <@{user_id}>', ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+            await interaction.channel.send(f'가입 신청 거절 · <@{user_id}> · 처리: <@{interaction.user.id}>', allowed_mentions=discord.AllowedMentions.none())
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
 
 
 class GateView(discord.ui.View):
